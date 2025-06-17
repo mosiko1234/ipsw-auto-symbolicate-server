@@ -4,6 +4,11 @@
 docker-images/
 .docker/
 
+# Docker image archives for airgap
+ipsw-images-*.tar
+*.tar.xz
+*.tar.bz2
+
 # IPSW files (large firmware files)
 *.ipsw
 *.dmg
