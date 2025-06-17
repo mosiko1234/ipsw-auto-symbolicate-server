@@ -47,7 +47,7 @@ services:
   symbol-server:
     build:
       context: .
-      dockerfile: Dockerfile.symbol-server-s3
+      dockerfile: docker/Dockerfile.symbol-server
     container_name: ipsw-symbol-server
     ports:
       - "${SYMBOL_PORT}:3993"
@@ -124,7 +124,7 @@ services:
   api-server:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: docker/Dockerfile.api
     container_name: ipsw-api-server
     ports:
       - "${API_PORT}:8000"
@@ -189,7 +189,7 @@ services:
   web-ui:
     build:
       context: .
-      dockerfile: Dockerfile.webui
+      dockerfile: docker/Dockerfile.webui
     container_name: ipsw-web-ui
     ports:
       - "${WEB_UI_PORT}:5001"
@@ -240,7 +240,7 @@ services:
   nginx:
     build:
       context: .
-      dockerfile: Dockerfile.nginx
+      dockerfile: docker/Dockerfile.nginx
     container_name: ipsw-nginx
     ports:
       - "${NGINX_PORT:-80}:80"

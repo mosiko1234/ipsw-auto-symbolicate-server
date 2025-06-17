@@ -6,13 +6,13 @@
 set -e
 
 # Load configuration
-if [ ! -f env.airgap ]; then
-    echo "❌ Error: env.airgap file not found"
-    echo "Please configure env.airgap first"
+if [ ! -f config/env.airgap ]; then
+    echo "❌ Error: config/env.airgap file not found"
+    echo "Please configure config/env.airgap first"
     exit 1
 fi
 
-source env.airgap
+source config/env.airgap
 
 echo "🏗️  Building Docker Images for Airgap Deployment"
 echo "📦 Target Registry: $AIRGAP_REGISTRY"
@@ -31,10 +31,10 @@ fi
 
 # Define images to build
 declare -A images
-images[symbol-server]="Dockerfile.symbol-server-s3"
-images[api-server]="Dockerfile.api"
-images[web-ui]="Dockerfile.webui"
-images[nginx]="Dockerfile.nginx"
+images[symbol-server]="docker/Dockerfile.symbol-server"
+images[api-server]="docker/Dockerfile.api"
+images[web-ui]="docker/Dockerfile.webui"
+images[nginx]="docker/Dockerfile.nginx"
 
 echo "🔨 Building images..."
 

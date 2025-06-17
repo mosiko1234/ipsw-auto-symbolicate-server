@@ -30,7 +30,7 @@ git clone https://github.com/mosiko1234/ipsw-auto-symbolicate-server.git
 cd ipsw-auto-symbolicate-server
 
 # 2. Configure environment (optional - has defaults)
-cp env.regular .env
+cp config/env.regular .env
 # Edit .env if needed
 
 # 3. Deploy
@@ -74,7 +74,7 @@ MAX_CONCURRENT_DOWNLOADS=3
 ### Step 1: Prepare Images (in regular environment)
 ```bash
 # 1. Configure airgap settings
-cp env.airgap .env
+cp config/env.airgap .env
 # Edit registry and S3 settings
 
 # 2. Build and push images
@@ -94,7 +94,7 @@ cp env.airgap .env
 ### Step 3: Deploy in Airgap
 ```bash
 # 1. Configure airgap environment
-cp env.airgap .env
+cp config/env.airgap .env
 # Update S3 and registry settings
 
 # 2. Deploy

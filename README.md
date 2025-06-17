@@ -196,6 +196,32 @@ docker load -i ipsw-images-latest.tar
 - **Documentation**: See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for comprehensive setup
 - **Security**: For security-related issues, please use private channels
 
+## 📁 Project Structure
+
+```
+ipsw-auto-symbolicate-server/
+├── docker/                     # Docker image definitions
+│   ├── Dockerfile.api          # API server image
+│   ├── Dockerfile.symbol-server # Symbol server image  
+│   ├── Dockerfile.webui        # Web UI image
+│   └── Dockerfile.nginx        # Nginx proxy image
+├── scripts/                    # Deployment and management scripts
+│   ├── deploy-regular.sh       # Regular deployment
+│   ├── deploy-airgap.sh        # Airgap deployment
+│   ├── build-images-for-airgap.sh # Image preparation
+│   ├── start-server.sh         # Start services
+│   └── stop-server.sh          # Stop services
+├── config/                     # Environment configurations
+│   ├── env.regular             # Regular environment
+│   └── env.airgap              # Airgap environment
+├── signatures/                 # blacktop/symbolicator signatures
+├── data/                       # Runtime data (auto-created)
+├── docker-compose.yml          # Unified deployment configuration
+├── deploy-regular.sh           # Convenience script → scripts/
+├── deploy-airgap.sh            # Convenience script → scripts/
+└── DEPLOYMENT_GUIDE.md         # Detailed deployment instructions
+```
+
 ---
 
 **🎯 Enterprise-ready iOS crash symbolication with unified deployment for all environments** 
