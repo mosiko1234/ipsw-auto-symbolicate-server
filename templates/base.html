@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}IPSW Symbol Server{% endblock %}</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Custom styles -->
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .file-upload-area {
+            border: 2px dashed #cbd5e0;
+            transition: all 0.3s ease;
+        }
+        
+        .file-upload-area:hover {
+            border-color: #667eea;
+            background-color: #f7fafc;
+        }
+        
+        .file-upload-area.dragover {
+            border-color: #667eea;
+            background-color: #edf2f7;
+        }
+        
+        .status-success { @apply bg-green-100 text-green-800 border-green-200; }
+        .status-partial { @apply bg-yellow-100 text-yellow-800 border-yellow-200; }
+        .status-error { @apply bg-red-100 text-red-800 border-red-200; }
+        .status-no_addresses { @apply bg-gray-100 text-gray-800 border-gray-200; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Navigation -->
+    <nav class="gradient-bg shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <h1 class="text-xl font-bold text-white">
+                        🔍 IPSW Symbol Server
+                    </h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div id="api-status" class="text-white text-sm">
+                        <span class="inline-block w-2 h-2 rounded-full bg-gray-400 mr-2"></span>
+                        Checking...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="mb-6">
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ 'danger' if category == 'error' else 'info' }} mb-4 p-4 rounded-lg border 
+                                    {{ 'bg-red-100 text-red-700 border-red-200' if category == 'error' else 'bg-blue-100 text-blue-700 border-blue-200' }}">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    {% if category == 'error' %}
+                                        <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                                        </svg>
+                                    {% else %}
+                                        <svg class="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+                                        </svg>
+                                    {% endif %}
+                                </div>
+                                <div class="ml-3">
+                                    <p class="text-sm font-medium">{{ message }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-gray-200 mt-auto">
+        <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <div class="text-center text-sm text-gray-500">
+                <p>IPSW Symbol Server - iOS Crash Analysis Tool</p>
+                <p class="mt-1">Upload your .ips crash files for kernel symbolication</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- JavaScript -->
+    <script>
+        // Check API status
+        async function checkApiStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                const statusElement = document.getElementById('api-status');
+                
+                if (data.status === 'online') {
+                    statusElement.innerHTML = '<span class="inline-block w-2 h-2 rounded-full bg-green-400 mr-2"></span>API Online';
+                } else if (data.status === 'offline') {
+                    statusElement.innerHTML = '<span class="inline-block w-2 h-2 rounded-full bg-red-400 mr-2"></span>API Offline';
+                } else {
+                    statusElement.innerHTML = '<span class="inline-block w-2 h-2 rounded-full bg-yellow-400 mr-2"></span>API Error';
+                }
+            } catch (error) {
+                const statusElement = document.getElementById('api-status');
+                statusElement.innerHTML = '<span class="inline-block w-2 h-2 rounded-full bg-red-400 mr-2"></span>API Offline';
+            }
+        }
+
+        // Check status on page load and every 30 seconds
+        document.addEventListener('DOMContentLoaded', checkApiStatus);
+        setInterval(checkApiStatus, 30000);
+
+        // File upload drag and drop
+        function setupFileUpload() {
+            const uploadArea = document.getElementById('upload-area');
+            const fileInput = document.getElementById('file-input');
+            
+            if (!uploadArea || !fileInput) return;
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, () => uploadArea.classList.add('dragover'), false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, () => uploadArea.classList.remove('dragover'), false);
+            });
+
+            uploadArea.addEventListener('drop', handleDrop, false);
+
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                
+                if (files.length > 0) {
+                    fileInput.files = files;
+                    updateFileName(files[0].name);
+                }
+            }
+
+            fileInput.addEventListener('change', function() {
+                if (this.files.length > 0) {
+                    updateFileName(this.files[0].name);
+                }
+            });
+
+            function updateFileName(name) {
+                const filenameDisplay = document.getElementById('filename-display');
+                if (filenameDisplay) {
+                    filenameDisplay.textContent = name;
+                    filenameDisplay.classList.remove('hidden');
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', setupFileUpload);
+    </script>
+</body>
+</html> 

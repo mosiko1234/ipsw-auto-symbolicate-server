@@ -1,0 +1,154 @@
+version: '3.8'
+
+# IPSW Auto-Symbolication with Symbol Server Edition
+# Optimized for internal networks and airgap environments
+# Includes PostgreSQL database and IPSWD symbol server
+
+services:
+  # PostgreSQL Database for Symbol Server
+  symbols-postgres:
+    image: postgres:15-alpine
+    container_name: symbols-postgres
+    environment:
+      POSTGRES_DB: symbols
+      POSTGRES_USER: symbols_user
+      POSTGRES_PASSWORD: symbols_pass
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - symbols_db_data:/var/lib/postgresql/data
+      - ./postgres/init-symbols-db.sql:/docker-entrypoint-initdb.d/init-symbols-db.sql:ro
+    ports:
+      - "5434:5432"  # Different port to avoid conflicts
+    networks:
+      - ipsw-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U symbols_user -d symbols"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Custom Symbol Server (replaces broken IPSWD)
+  custom-symbol-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.symbol-server
+    container_name: custom-symbol-server
+    environment:
+      - SIGNATURES_DIR=/app/data/signatures
+      - DOWNLOADS_DIR=/app/data/downloads
+      - CACHE_DIR=/app/data/cache
+      - SYMBOLS_DIR=/app/data/symbols
+      - IPSW_BINARY=ipsw
+      # S3 Configuration for auto-scanning
+      - S3_ENDPOINT=http://host.docker.internal:9000
+      - S3_BUCKET=ipsw
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+      - S3_USE_SSL=false
+    volumes:
+      - ./signatures:/app/data/signatures:ro
+      - ipsw_data:/app/data
+      - ipsw_cache:/app/data/cache
+      - ipsw_symbols:/app/data/symbols
+      - ipsw_downloads:/app/data/downloads
+      - ipsw_logs:/var/log/ipsw
+    ports:
+      - "3993:3993"
+    networks:
+      - ipsw-network
+    depends_on:
+      symbols-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Main API with Symbol Server Edition
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: ipsw-api-symbol-server
+    environment:
+      # S3 Configuration (REQUIRED)
+      - S3_ENDPOINT=http://host.docker.internal:9000
+      - S3_BUCKET=ipsw
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+      - S3_USE_SSL=false
+      - S3_VERIFY_SSL=false
+      
+      # Symbol Server Configuration
+      - IPSWD_URL=http://custom-symbol-server:3993
+      - SYMBOL_DB_URL=postgresql://symbols_user:symbols_pass@symbols-postgres:5432/symbols
+      - SIGNATURES_DIR=/app/data/signatures
+      
+      # API Configuration
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LOG_LEVEL=info
+      
+      # Internal Network Optimizations
+      - HTTPX_TIMEOUT=300
+      - CACHE_TTL=1800
+      - MAX_WORKERS=4
+    volumes:
+      - ipsw_downloads:/data/downloads
+      - ipsw_cache:/data/cache
+      - ipsw_symbols:/data/symbols
+      - ipsw_logs:/var/log/ipsw
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8000:8000"
+    networks:
+      - ipsw-network
+    depends_on:
+      symbols-postgres:
+        condition: service_healthy
+      custom-symbol-server:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # Optional: Nginx reverse proxy for production
+  nginx:
+    image: nginx:alpine
+    container_name: ipsw-nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - ipsw-network
+    depends_on:
+      - api
+    restart: unless-stopped
+    profiles:
+      - production
+
+volumes:
+  symbols_db_data:
+    driver: local
+  ipsw_data:
+    driver: local
+  ipsw_cache:
+    driver: local
+  ipsw_symbols:
+    driver: local
+  ipsw_downloads:
+    driver: local
+  ipsw_logs:
+    driver: local
+
+networks:
+  ipsw-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16 

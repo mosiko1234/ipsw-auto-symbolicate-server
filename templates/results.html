@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+
+{% block title %}Analysis Results - IPSW Symbol Server{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <!-- Header -->
+    <div class="mb-8">
+        <div class="flex items-center justify-between">
+            <div>
+                <h2 class="text-3xl font-bold text-gray-900">Analysis Results</h2>
+                <p class="text-gray-600 mt-1">File: <span class="font-medium">{{ original_filename }}</span></p>
+                <p class="text-sm text-gray-500">Analysis ID: {{ analysis_id[:8] }}...{{ analysis_id[-8:] }}</p>
+            </div>
+            <div class="flex space-x-3">
+                <a href="{{ url_for('download_results', analysis_id=analysis_id) }}" 
+                   class="inline-flex items-center px-4 py-2 border border-blue-300 rounded-md shadow-sm text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    Download Results
+                </a>
+                <a href="{{ url_for('index') }}" 
+                   class="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                    </svg>
+                    New Analysis
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Summary -->
+    <div class="mb-8">
+        <div class="status-{{ results.summary.status }} border rounded-lg p-4">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    {% if results.summary.status == 'success' %}
+                        <svg class="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                        </svg>
+                    {% elif results.summary.status == 'partial' %}
+                        <svg class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                        </svg>
+                    {% else %}
+                        <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                        </svg>
+                    {% endif %}
+                </div>
+                <div class="ml-3">
+                    <h3 class="text-sm font-medium">{{ results.summary.message }}</h3>
+                    {% if results.message %}
+                        <p class="text-sm mt-1">{{ results.message }}</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <!-- Left Column -->
+        <div class="space-y-6">
+            <!-- Performance Metrics -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h3 class="text-lg font-semibold text-gray-900">⏱️ Performance Metrics</h3>
+                </div>
+                <div class="p-6">
+                    <div class="grid grid-cols-1 gap-4">
+                        {% if results.timing.total %}
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Total Processing Time:</span>
+                                <span class="font-medium">{{ results.timing.total }}</span>
+                            </div>
+                        {% endif %}
+                        {% if results.timing.symbolication %}
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Symbolication Time:</span>
+                                <span class="font-medium">{{ results.timing.symbolication }}</span>
+                            </div>
+                        {% endif %}
+                        {% if results.timing.download %}
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Download Time:</span>
+                                <span class="font-medium">{{ results.timing.download }}</span>
+                            </div>
+                        {% endif %}
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Analysis Time:</span>
+                            <span class="font-medium">{{ results.timestamp }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Device Information -->
+            {% if results.device_info %}
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h3 class="text-lg font-semibold text-gray-900">📱 Device Information</h3>
+                </div>
+                <div class="p-6">
+                    <div class="grid grid-cols-1 gap-4">
+                        {% if results.device_info.os_version %}
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">OS Version:</span>
+                                <span class="font-medium">{{ results.device_info.os_version }}</span>
+                            </div>
+                        {% endif %}
+                        {% if results.device_info.model %}
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Device Model:</span>
+                                <span class="font-medium">{{ results.device_info.model }}</span>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Symbolication Summary -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h3 class="text-lg font-semibold text-gray-900">🔧 Symbolication Summary</h3>
+                </div>
+                <div class="p-6">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="text-center">
+                            <div class="text-2xl font-bold text-green-600">{{ results.symbolication.symbol_lines or 0 }}</div>
+                            <div class="text-sm text-gray-600">Symbolicated Lines</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-2xl font-bold text-red-600">{{ results.symbolication.unknown_lines or 0 }}</div>
+                            <div class="text-sm text-gray-600">Unknown Lines</div>
+                        </div>
+                    </div>
+                    {% if results.symbolication.output_size %}
+                        <div class="mt-4 text-center">
+                            <div class="text-sm text-gray-600">Output Size: {{ results.symbolication.output_size }}</div>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column -->
+        <div class="space-y-6">
+            <!-- Kernel Analysis -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h3 class="text-lg font-semibold text-gray-900">🎯 Kernel Address Analysis</h3>
+                </div>
+                <div class="p-6">
+                    <div class="text-center mb-4">
+                        <div class="text-3xl font-bold text-blue-600">{{ results.kernel_analysis.addresses_found or 0 }}</div>
+                        <div class="text-sm text-gray-600">Kernel Addresses Found</div>
+                    </div>
+                    
+                    {% if results.kernel_analysis.addresses %}
+                        <div class="space-y-2">
+                            <h4 class="font-medium text-gray-900 mb-2">Address List:</h4>
+                            {% for address in results.kernel_analysis.addresses %}
+                                <div class="bg-gray-50 rounded p-2 font-mono text-sm">
+                                    {{ address }}
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Sample Symbols -->
+            {% if results.symbolication.sample_symbols %}
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h3 class="text-lg font-semibold text-gray-900">✅ Sample Symbolicated Code</h3>
+                </div>
+                <div class="p-6">
+                    <div class="space-y-2">
+                        {% for symbol in results.symbolication.sample_symbols %}
+                            <div class="bg-green-50 border border-green-200 rounded p-3">
+                                <code class="text-sm text-green-800">{{ symbol }}</code>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Error Information -->
+            {% if results.error %}
+            <div class="bg-white rounded-lg shadow-sm border border-red-200">
+                <div class="px-6 py-4 border-b border-red-200 bg-red-50">
+                    <h3 class="text-lg font-semibold text-red-900">❌ Error Details</h3>
+                </div>
+                <div class="p-6">
+                    <div class="bg-red-50 border border-red-200 rounded p-3">
+                        <code class="text-sm text-red-800">{{ results.error }}</code>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
+        <a href="{{ url_for('download_results', analysis_id=analysis_id) }}" 
+           class="inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+            Download Complete Analysis (JSON)
+        </a>
+        
+        <a href="{{ url_for('index') }}" 
+           class="inline-flex items-center justify-center px-6 py-3 border border-gray-300 rounded-md shadow-sm text-base font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+            </svg>
+            Analyze Another File
+        </a>
+    </div>
+
+    <!-- Developer Tips -->
+    <div class="mt-8 bg-gray-50 border border-gray-200 rounded-lg p-6">
+        <h4 class="text-sm font-semibold text-gray-900 mb-3">💡 Developer Tips</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-700">
+            {% if results.summary.status == 'success' %}
+                <div>✅ Use the symbolicated addresses to identify the exact function calls causing the crash</div>
+                <div>🔍 Cross-reference with your source code to pinpoint the issue</div>
+            {% elif results.summary.status == 'partial' %}
+                <div>⚠️ Some addresses were found but couldn't be symbolicated - check IPSW compatibility</div>
+                <div>🔧 Verify that the crash log format matches our supported versions</div>
+            {% else %}
+                <div>❌ No kernel addresses found - ensure you're uploading a complete iOS crash log</div>
+                <div>📋 Check that your file contains kernelFrames data</div>
+            {% endif %}
+            <div>📚 Download the JSON for integration with your development tools</div>
+            <div>🔄 Re-run analysis if you get updated IPSW files or signatures</div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

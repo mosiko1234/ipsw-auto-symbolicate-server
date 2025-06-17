@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  symbol-server-s3-optimized:
+    build:
+      context: .
+      dockerfile: Dockerfile.symbol-server-s3
+    container_name: symbol-server-s3-optimized
+    ports:
+      - "8000:8000"
+    environment:
+      - S3_ENDPOINT=http://host.docker.internal:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+      - S3_BUCKET=ipsw
+      - S3_REGION=us-east-1
+      - S3_USE_SSL=false
+      - CACHE_SIZE_GB=50
+      - MAX_CONCURRENT_DOWNLOADS=3
+      - CLEANUP_OLD_FILES=true
+      - CLEANUP_AFTER_HOURS=24
+    volumes:
+      # Local cache for symbols and metadata (small files)
+      - ./data/cache:/app/data/cache
+      - ./data/symbols:/app/data/symbols
+      - ./signatures:/app/data/signatures:ro
+      # Shared S3 mount point (large IPSW files)
+      - s3-mount:/app/data/s3-ipsw:shared
+      # Temporary processing space
+      - processing-temp:/app/data/temp
+    tmpfs:
+      # Fast temporary processing in RAM
+      - /app/data/processing:size=2G,noexec,nosuid,nodev
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse
+    security_opt:
+      - apparmor:unconfined
+    restart: unless-stopped
+    depends_on:
+      - s3-mount
+
+  s3-mount:
+    image: s3fs/s3fs:latest
+    container_name: s3-mount-service
+    environment:
+      - S3_ENDPOINT=http://host.docker.internal:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+      - S3_BUCKET=ipsw
+      - S3_USE_SSL=false
+    volumes:
+      - s3-mount:/mnt/s3:shared
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse
+    security_opt:
+      - apparmor:unconfined
+    command: >
+      sh -c "
+        echo '${S3_ACCESS_KEY}:${S3_SECRET_KEY}' > /etc/passwd-s3fs &&
+        chmod 600 /etc/passwd-s3fs &&
+        s3fs ${S3_BUCKET} /mnt/s3 -o url=${S3_ENDPOINT} -o use_path_request_style -o passwd_file=/etc/passwd-s3fs -o allow_other -o use_cache=/tmp -o ensure_diskfree=500
+      "
+    restart: unless-stopped
+
+volumes:
+  s3-mount:
+    driver: local
+  processing-temp:
+    driver: local 

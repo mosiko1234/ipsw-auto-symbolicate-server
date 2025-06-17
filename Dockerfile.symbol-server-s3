@@ -1,0 +1,48 @@
+FROM ubuntu:22.04
+
+# Install dependencies for S3 access and IPSW processing
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    curl \
+    wget \
+    unzip \
+    s3fs \
+    fuse \
+    rsync \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install IPSW tool
+RUN curl -sSL https://github.com/blacktop/ipsw/releases/download/v3.1.523/ipsw_3.1.523_linux_amd64.tar.gz | \
+    tar -xz -C /usr/local/bin/ ipsw && \
+    chmod +x /usr/local/bin/ipsw
+
+# Install Python dependencies
+COPY requirements-symbol-server.txt /tmp/
+RUN pip3 install -r /tmp/requirements-symbol-server.txt
+
+# Create app directory and structure
+WORKDIR /app
+RUN mkdir -p /app/data/{cache,symbols,downloads,temp,processing,s3-ipsw}
+
+# Copy application files
+COPY custom_symbol_server.py /app/
+COPY ipsw-config.yml /app/
+COPY s3_optimized_manager.py /app/
+
+# Copy startup script
+COPY start-s3-optimized.sh /app/
+RUN chmod +x /app/start-s3-optimized.sh
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV IPSW_CONFIG_PATH=/app/ipsw-config.yml
+
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["/app/start-s3-optimized.sh"] 

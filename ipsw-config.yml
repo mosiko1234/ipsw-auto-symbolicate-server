@@ -1,0 +1,24 @@
+daemon:
+  sigs-dir: /app/data/signatures/symbolicator/kernel
+
+# Logging configuration
+logging:
+  level: info
+  
+# Cache configuration
+cache:
+  dir: /app/data/cache
+  
+# Download configuration
+download:
+  dir: /app/data/downloads
+  
+# Kernel symbolication settings
+kernel:
+  sigs-dir: /app/data/signatures/symbolicator/kernel
+  extract-kexts: true
+  
+# Symbol server configuration
+symbol-server:
+  host: 0.0.0.0
+  port: 3993 
