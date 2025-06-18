@@ -134,38 +134,56 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to save symbols metadata: {e}")
     
-    async def cache_symbols(self, cache_key: str, symbol_data: Dict[str, str], expires_hours: int = 24):
+    def cache_symbols(self, cache_key: str, symbol_data: Dict[str, str], expires_hours: int = 24):
         """Cache symbols data in database"""
         try:
             expires_at = datetime.now() + timedelta(hours=expires_hours)
             
-            async with self.pool.acquire() as conn:
-                await conn.execute("""
-                    INSERT INTO symbol_cache (cache_key, symbol_data, expires_at)
-                    VALUES ($1, $2, $3)
-                    ON CONFLICT (cache_key)
-                    DO UPDATE SET 
-                        symbol_data = EXCLUDED.symbol_data,
-                        expires_at = EXCLUDED.expires_at,
-                        created_at = CURRENT_TIMESTAMP
-                """, cache_key, json.dumps(symbol_data), expires_at)
-                
+            conn = self.pool.getconn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO symbol_cache (cache_key, symbol_data, expires_at)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (cache_key)
+                        DO UPDATE SET 
+                            symbol_data = EXCLUDED.symbol_data,
+                            expires_at = EXCLUDED.expires_at,
+                            created_at = CURRENT_TIMESTAMP
+                    """, (cache_key, json.dumps(symbol_data), expires_at))
+                    conn.commit()
+                    
                 logger.info(f"Cached symbols with key: {cache_key}")
+            finally:
+                self.pool.putconn(conn)
         except Exception as e:
             logger.error(f"Failed to cache symbols: {e}")
     
-    async def get_cached_symbols(self, cache_key: str) -> Optional[Dict[str, str]]:
+    def get_cached_symbols(self, cache_key: str) -> Optional[Dict[str, str]]:
         """Get cached symbols from database"""
         try:
-            async with self.pool.acquire() as conn:
-                row = await conn.fetchrow("""
-                    SELECT symbol_data FROM symbol_cache 
-                    WHERE cache_key = $1 AND expires_at > CURRENT_TIMESTAMP
-                """, cache_key)
-                
-                if row:
-                    return json.loads(row['symbol_data'])
-                return None
+            conn = self.pool.getconn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT symbol_data FROM symbol_cache 
+                        WHERE cache_key = %s AND expires_at > CURRENT_TIMESTAMP
+                    """, (cache_key,))
+                    
+                    row = cur.fetchone()
+                    if row:
+                        symbol_data = row[0]
+                        # Handle both string and dict types from PostgreSQL JSONB
+                        if isinstance(symbol_data, str):
+                            return json.loads(symbol_data)
+                        elif isinstance(symbol_data, dict):
+                            return symbol_data
+                        else:
+                            logger.error(f"Unexpected symbol_data type: {type(symbol_data)}")
+                            return None
+                    return None
+            finally:
+                self.pool.putconn(conn)
         except Exception as e:
             logger.error(f"Failed to get cached symbols: {e}")
             return None
@@ -541,7 +559,7 @@ async def auto_ensure_symbols_available(device_model: str, ios_version: str, bui
     try:
         # First check if symbols already exist
         cache_key = f"{device_model}_{ios_version}"
-        symbols = await db_manager.get_cached_symbols(cache_key)
+        symbols = db_manager.get_cached_symbols(cache_key)
         
         if symbols:
             logger.info(f"Symbols found for {cache_key} ({len(symbols)} symbols)")
@@ -564,7 +582,7 @@ async def auto_ensure_symbols_available(device_model: str, ios_version: str, bui
             else:
                 cache_key_with_build = f"{device_model}_{ios_version}_{pattern}"
                 
-            symbols = await db_manager.get_cached_symbols(cache_key_with_build)
+            symbols = db_manager.get_cached_symbols(cache_key_with_build)
             if symbols:
                 logger.info(f"Found symbols with pattern: {cache_key_with_build} ({len(symbols)} symbols)")
                 return True, f"Symbols found with pattern {cache_key_with_build}"
@@ -581,11 +599,19 @@ async def auto_ensure_symbols_available(device_model: str, ios_version: str, bui
             available_ipsws = await s3_manager.list_available_ipsw(device_filter=device_model)
             logger.info(f"Found {len(available_ipsws)} IPSW files in S3")
             
+            # Normalize iOS version (extract version number from strings like "iPhone OS 18.5 (22F76)")
+            normalized_ios_version = ios_version
+            import re
+            version_match = re.search(r'(\d+\.\d+(?:\.\d+)?)', ios_version)
+            if version_match:
+                normalized_ios_version = version_match.group(1)
+            logger.info(f"Normalized iOS version: {normalized_ios_version}")
+            
             matching_ipsw = None
             for ipsw in available_ipsws:
                 logger.info(f"Checking IPSW: {ipsw}")
                 if (ipsw.get('device') == device_model and 
-                    ipsw.get('version') == ios_version):
+                    ipsw.get('version') == normalized_ios_version):
                     if build_number and ipsw.get('build') == build_number:
                         matching_ipsw = ipsw
                         break
@@ -597,7 +623,7 @@ async def auto_ensure_symbols_available(device_model: str, ios_version: str, bui
                 # Try without exact build match
                 for ipsw in available_ipsws:
                     if (ipsw.get('device') == device_model and 
-                        ipsw.get('version') == ios_version):
+                        ipsw.get('version') == normalized_ios_version):
                         matching_ipsw = ipsw
                         break
             
@@ -610,7 +636,7 @@ async def auto_ensure_symbols_available(device_model: str, ios_version: str, bui
             # Download IPSW
             download_success, download_msg, ipsw_path = await s3_manager.download_ipsw(
                 device_model=device_model,
-                os_version=ios_version,
+                os_version=normalized_ios_version,
                 build_number=build_number or matching_ipsw.get('build')
             )
             
@@ -629,7 +655,7 @@ async def auto_ensure_symbols_available(device_model: str, ios_version: str, bui
             
             # Check cache again with extracted info
             cache_key_extracted = f"{device_model}_{extracted_build_version}_unknown"
-            symbols = await db_manager.get_cached_symbols(cache_key_extracted)
+            symbols = db_manager.get_cached_symbols(cache_key_extracted)
             
             if symbols:
                 logger.info(f"Symbols found after extraction check: {cache_key_extracted} ({len(symbols)} symbols)")
@@ -671,11 +697,11 @@ async def auto_ensure_symbols_available(device_model: str, ios_version: str, bui
             
             # Cache with all possible keys
             for cache_key in cache_keys:
-                await db_manager.cache_symbols(cache_key, symbols, 24)
+                db_manager.cache_symbols(cache_key, symbols, 24)
                 logger.info(f"Cached symbols with key: {cache_key}")
             
             # Save metadata
-            await db_manager.save_symbols_metadata(
+            db_manager.save_symbols_metadata(
                 device_model, extracted_ios_version, extracted_build_version, 
                 kernelcache_path, symbols_path
             )
@@ -875,7 +901,7 @@ async def scan_ipsw(request: IPSWScanRequest, background_tasks: BackgroundTasks)
         
         # Check cache first
         cache_key = f"{device_model}_{ios_version}_{build_version}"
-        cached_symbols = await db_manager.get_cached_symbols(cache_key)
+        cached_symbols = db_manager.get_cached_symbols(cache_key)
         
         if cached_symbols:
             logger.info(f"Using cached symbols for {cache_key}")
@@ -908,16 +934,12 @@ async def scan_ipsw(request: IPSWScanRequest, background_tasks: BackgroundTasks)
             logger.info(f"Loaded {symbols_count} symbols from {symbols_path}")
             
             # Save to database
-            background_tasks.add_task(
-                db_manager.save_symbols_metadata,
+            db_manager.save_symbols_metadata(
                 device_model, ios_version, build_version, kernelcache_path, symbols_path
             )
             
             # Cache symbols
-            background_tasks.add_task(
-                db_manager.cache_symbols,
-                cache_key, symbols, 24
-            )
+            db_manager.cache_symbols(cache_key, symbols, 24)
             
             # Update stats
             stats['total_ipsws_scanned'] += 1
@@ -974,7 +996,7 @@ async def symbolicate_crash(request: SymbolicateRequest):
         # Get symbols from cache (should be available now after auto-scan)
         cache_key = f"{request.device_model}_{request.ios_version}"
         logger.info(f"Looking for symbols with key: {cache_key}")
-        symbols = await db_manager.get_cached_symbols(cache_key)
+        symbols = db_manager.get_cached_symbols(cache_key)
         
         if not symbols:
             # Try to find symbols by build version pattern
@@ -982,14 +1004,14 @@ async def symbolicate_crash(request: SymbolicateRequest):
             for build in build_patterns:
                 cache_key_with_build = f"{request.device_model}_{request.ios_version}_{build}"
                 logger.info(f"Trying key: {cache_key_with_build}")
-                symbols = await db_manager.get_cached_symbols(cache_key_with_build)
+                symbols = db_manager.get_cached_symbols(cache_key_with_build)
                 if symbols:
                     logger.info(f"Found symbols with key: {cache_key_with_build}")
                     break
                 # Also try with build as ios_version (for cases where build was saved as ios_version)
                 cache_key_alt = f"{request.device_model}_{build}_unknown"
                 logger.info(f"Trying alternative key: {cache_key_alt}")
-                symbols = await db_manager.get_cached_symbols(cache_key_alt)
+                symbols = db_manager.get_cached_symbols(cache_key_alt)
                 if symbols:
                     logger.info(f"Found symbols with alternative key: {cache_key_alt}")
                     break

@@ -31,6 +31,7 @@ RUN mkdir -p /app/data/{cache,symbols,downloads,temp,processing,s3-ipsw}
 COPY custom_symbol_server.py /app/
 COPY internal_s3_manager.py /app/
 COPY symbol_server_manager.py /app/
+COPY device_mapping_manager.py /app/
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1

@@ -228,6 +228,22 @@
     </div>
     {% endif %}
 
+    <!-- Processing Findings Log -->
+    {% if result.findings %}
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="metric-card">
+                <h5><i class="fas fa-tasks text-info"></i> יומן עיבוד</h5>
+                <div class="processing-log">
+                    {% for finding in result.findings %}
+                        <div>{{ finding }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Output Preview and Full Display -->
     {% if result.symbolicated_output %}
     <div class="mt-4">
@@ -449,6 +465,19 @@ document.addEventListener('DOMContentLoaded', function() {
 .thread-info {
     color: #6f42c1;
     font-weight: 500;
+}
+
+.processing-log {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    padding: 1rem;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    color: #495057;
 }
 
 .progress {

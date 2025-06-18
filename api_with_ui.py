@@ -23,6 +23,8 @@ import httpx
 
 # Import the S3 manager
 from internal_s3_manager import InternalS3Manager
+# Import the new Device Mapping Manager
+from device_mapping_manager import DeviceMappingManager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -73,6 +75,14 @@ except Exception as e:
     logger.error(f"Failed to initialize S3 manager: {e}")
     s3_manager = None
 
+# Initialize the Device Mapping Manager
+try:
+    device_mapper = DeviceMappingManager()
+    logger.info("Device Mapping Manager initialized successfully.")
+except Exception as e:
+    logger.error(f"Failed to initialize Device Mapping Manager: {e}")
+    device_mapper = None
+
 class SymbolicationResult(BaseModel):
     success: bool
     message: str
@@ -80,6 +90,7 @@ class SymbolicationResult(BaseModel):
     analysis_id: Optional[str] = None
     file_info: Optional[Dict] = None
     total_time: Optional[float] = None
+    findings: List[str] = []
 
 class AutoScanRequest(BaseModel):
     device_model: str
@@ -112,132 +123,143 @@ def parse_ips_file(content: str) -> Dict[str, any]:
         "is_ips_format": False
     }
     
+    # Try to find the start of a JSON object '{' and parse from there
     try:
-        # Try to parse as JSON first (for .ips files)
-        data = json.loads(content)
-        info["is_ips_format"] = True
-        
-        # Extract metadata
-        info["bug_type"] = data.get("bug_type", "unknown")
-        info["incident_id"] = data.get("incident_id")
-        info["process_name"] = data.get("procName") or data.get("processName")
-        
-        # Extract device information
-        device_info = data.get("device", {}) or data.get("modelCode", {})
-        if isinstance(device_info, dict):
-            info["device_model"] = device_info.get("model") or device_info.get("marketingName")
-        elif isinstance(device_info, str):
-            info["device_model"] = device_info
+        json_start_index = content.find('{')
+        if json_start_index != -1:
+            json_content = content[json_start_index:]
+            data = json.loads(json_content)
+            info["is_ips_format"] = True
             
-        # Extract OS version
-        os_version = data.get("osVersion", {}) or data.get("systemVersion", {})
-        if isinstance(os_version, dict):
-            info["ios_version"] = os_version.get("major", "unknown")
-            info["build_version"] = os_version.get("build")
-        elif isinstance(os_version, str):
-            info["ios_version"] = os_version
+            # Extract metadata from JSON structure
+            info["bug_type"] = data.get("bug_type")
+            info["incident_id"] = data.get("incident_id")
+            info["process_name"] = data.get("procName") or data.get("processName")
             
-        # Try alternative paths for version info
-        if not info["ios_version"]:
-            version_str = data.get("version") or data.get("osVersion")
-            if version_str:
-                # Extract version from string like "iOS 18.5 (22F76)"
-                version_match = re.search(r'iOS\s+([\d.]+)', str(version_str))
+            # Add "product" field to device model extraction
+            info["device_model"] = data.get("product")
+            
+            # Extract device information (can be in multiple places)
+            if not info["device_model"]:
+                device_info = data.get("device", {}) or data.get("modelCode", {})
+                if isinstance(device_info, dict):
+                    info["device_model"] = device_info.get("model") or device_info.get("marketingName")
+                elif isinstance(device_info, str):
+                    info["device_model"] = device_info
+            
+            # Extract OS version (can be in multiple places)
+            os_version_obj = data.get("osVersion", {}) or data.get("systemVersion", {})
+            if isinstance(os_version_obj, dict):
+                info["ios_version"] = os_version_obj.get("train") or os_version_obj.get("major")
+                info["build_version"] = os_version_obj.get("build")
+            elif isinstance(os_version_obj, str):
+                info["ios_version"] = os_version_obj
+            
+            # Fallback for version string like "iOS 18.5 (22F76)"
+            if not info["ios_version"] or not info["build_version"]:
+                version_str = data.get("version") or str(data.get("osVersion", "")) or content
+                version_match = re.search(r'(?:iPhone OS|iOS|iPadOS)\s*([\d\.]+(?:\sbeta)?)', version_str, re.I)
                 if version_match:
-                    info["ios_version"] = version_match.group(1)
-                    
-                build_match = re.search(r'\(([\w\d]+)\)', str(version_str))
+                    info["ios_version"] = version_match.group(1).strip()
+                
+                build_match = re.search(r'\(([\w\d]+)\)', version_str)
                 if build_match:
                     info["build_version"] = build_match.group(1)
-        
-        logger.info(f"Parsed IPS file: {info}")
-        
+
+            logger.info(f"Successfully parsed JSON from .ips file")
+            return info
+        else:
+            raise json.JSONDecodeError("No JSON object found", content, 0)
+
     except json.JSONDecodeError:
-        # Not a JSON file, try to parse as text crash log
+        # If JSON parsing fails, treat it as a plain text crash log
+        logger.warning("Could not parse as JSON, attempting to parse as plain text crash log.")
         info["is_ips_format"] = False
         
-        # Look for crash information in text format
-        lines = content.split('\n')
-        for line in lines:
-            line = line.strip()
-            
-            # Device model patterns
-            if 'Hardware Model:' in line or 'Model:' in line:
-                info["device_model"] = line.split(':')[-1].strip()
-            elif 'Identifier:' in line and 'iPhone' in line:
-                info["device_model"] = line.split(':')[-1].strip()
-                
-            # iOS version patterns  
-            elif 'OS Version:' in line or 'Version:' in line:
-                version_part = line.split(':')[-1].strip()
-                version_match = re.search(r'([\d.]+)', version_part)
-                if version_match:
-                    info["ios_version"] = version_match.group(1)
-                    
-                build_match = re.search(r'\(([\w\d]+)\)', version_part)
-                if build_match:
-                    info["build_version"] = build_match.group(1)
-                    
-            # Process name
-            elif 'Process:' in line or 'Process Name:' in line:
-                info["process_name"] = line.split(':')[-1].strip()
-                
+        # Define regex patterns for various fields
+        patterns = {
+            "device_model": [
+                r'Hardware Model:\s*(\S+)',
+                r'"product"\s*:\s*"([^"]+)"',
+                r'"model":\s*"([^"]+)"',
+                r'"modelCode":\s*"([^"]+)"'
+            ],
+            "ios_version": [
+                r'OS Version:\s*(?:iPhone OS|iOS|iPadOS)\s*([\d\.]+(?:\sbeta)?)',
+                r'"os_version":\s*"([^"]+)"',
+                r'"train":\s*"([^"]+)"'
+            ],
+            "build_version": [
+                r'OS Version:.*\((\w+)\)',
+                r'"build":\s*"([^"]+)"'
+            ],
+            "process_name": [
+                r'Process:\s*(\S+)',
+                r'"procName":\s*"([^"]+)"',
+                r'"processName":\s*"([^"]+)"'
+            ],
+            "bug_type": [
+                r'Bug Type:\s*(\d+)',
+                r'"bug_type":\s*"(\d+)"'
+            ]
+        }
+        
+        # Iterate through patterns and find first match for each field
+        for key, regex_list in patterns.items():
+            for regex in regex_list:
+                match = re.search(regex, content, re.IGNORECASE)
+                if match:
+                    info[key] = match.group(1).strip()
+                    logger.info(f"Found '{key}' using regex: {info[key]}")
+                    break  # Move to the next key once found
+        
     return info
 
 async def symbolicate_via_api(crash_content: str) -> SymbolicationResult:
     analysis_id = str(uuid.uuid4())[:8]
+    findings = []
     
     try:
+        start_time = time.time()
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] התחלת עיבוד עבור ניתוח {analysis_id}")
+
         # Parse IPS file to extract metadata
         file_info = parse_ips_file(crash_content)
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] סוג קובץ זוהה: {'JSON' if file_info['is_ips_format'] else 'Text'}")
         
-        # Extract device and version information
-        device_model = file_info.get("device_model", "unknown")
-        ios_version = file_info.get("ios_version", "unknown")
-        build_version = file_info.get("build_version", "unknown")
+        # Extract device and version information from the parsed data
+        device_model = file_info.get("device_model")
+        ios_version = file_info.get("ios_version")
+        build_version = file_info.get("build_version")
         
-        logger.info(f"Extracted from crash file - Device: {device_model}, iOS: {ios_version}, Build: {build_version}")
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] חולצו פרטים ראשוניים: דגם='{device_model}', גרסה='{ios_version}', בילד='{build_version}'")
+
+        # Attempt to map the device identifier to a marketing name
+        if device_model and device_mapper:
+            original_identifier = device_model
+            marketing_name = device_mapper.get_marketing_name(original_identifier)
+            if marketing_name != original_identifier:
+                findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] תרגום מזהה מכשיר: '{original_identifier}' -> '{marketing_name}'")
+                device_model = marketing_name  # Use the marketing name for the search
+                file_info['device_model'] = marketing_name # Update file_info for display
         
-        # Improve device model extraction from content if not found in metadata
-        if device_model == "unknown" or not device_model:
-            # Look for device patterns in the crash content
-            device_patterns = [
-                r'Hardware Model:\s*(\S+)',
-                r'Model:\s*(\S+)',
-                r'Identifier:\s*(iPhone\d+,\d+)',
-                r'"modelCode":\s*"([^"]+)"',
-                r'"model":\s*"([^"]+)"'
-            ]
-            
-            for pattern in device_patterns:
-                match = re.search(pattern, crash_content, re.IGNORECASE)
-                if match:
-                    device_model = match.group(1)
-                    logger.info(f"Found device model via pattern: {device_model}")
-                    break
-        
-        # Improve iOS version extraction
-        if ios_version == "unknown" or not ios_version:
-            version_patterns = [
-                r'OS Version:\s*iOS\s+([\d.]+)',
-                r'Version:\s*iOS\s+([\d.]+)',
-                r'"osVersion":\s*"([^"]+)"',
-                r'iOS\s+([\d.]+)\s*\(',
-                r'System Version:\s*([\d.]+)'
-            ]
-            
-            for pattern in version_patterns:
-                match = re.search(pattern, crash_content, re.IGNORECASE)
-                if match:
-                    ios_version = match.group(1)
-                    logger.info(f"Found iOS version via pattern: {ios_version}")
-                    break
-        
-        # Update file_info with potentially improved data
-        file_info['device_model'] = device_model
-        file_info['ios_version'] = ios_version
-        
+        # Validate that we have the necessary info before calling the symbol server
+        if not device_model or not ios_version:
+            error_message = "לא ניתן היה לחלץ את דגם המכשיר או גרסת iOS מקובץ הקריסה. לא ניתן להמשיך ב-Symbolication."
+            logger.error(error_message)
+            findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] שגיאה: {error_message}")
+            return SymbolicationResult(
+                success=False,
+                message=error_message,
+                symbolicated_output=crash_content,
+                analysis_id=analysis_id,
+                file_info=file_info,
+                total_time=time.time() - start_time,
+                findings=findings
+            )
+
         # Make request to symbol server
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] שולח בקשה לשרת הסמלים: {SYMBOL_SERVER_URL}")
         async with httpx.AsyncClient(timeout=300.0) as client:
             response = await client.post(
                 f"{SYMBOL_SERVER_URL}/v1/symbolicate",
@@ -259,53 +281,64 @@ async def symbolicate_via_api(crash_content: str) -> SymbolicationResult:
                         message += f" for IPS file"
                     if file_info.get("process_name"):
                         message += f" (Process: {file_info['process_name']})"
-                    if device_model != "unknown":
+                    if device_model:
                         message += f" on {device_model}"
-                    if ios_version != "unknown":
+                    if ios_version:
                         message += f" iOS {ios_version}"
                     
+                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] סימבולים מומשכים בהצלחה")
                     return SymbolicationResult(
                         success=True,
                         message=message,
                         symbolicated_output=symbolicated_output,
                         analysis_id=analysis_id,
-                        file_info=file_info,  # Add file info to result
-                        total_time=api_result.get('processing_time', 0)
+                        file_info=file_info,
+                        total_time=api_result.get('processing_time', 0),
+                        findings=findings
                     )
                 else:
                     # Handle cases where server returns 200 but success=false
                     error_msg = api_result.get('message', 'Unknown error')
+                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] שרת הסמלים החזיר שגיאה: {error_msg}")
                     if 'No symbols found' in error_msg or 'symbols not available' in error_msg:
                         error_msg = f"אין סימבולים זמינים עבור {device_model} iOS {ios_version}. "
-                        if build_version != "unknown":
+                        if build_version:
                             error_msg += f"Build {build_version}. "
                         error_msg += "יש להוסיף קובץ IPSW מתאים למערכת או לבדוק שפרטי המכשיר נכונים."
                     
+                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] שגיאה: {error_msg}")
                     return SymbolicationResult(
                         success=False,
                         message=error_msg,
                         symbolicated_output=crash_content,
                         analysis_id=analysis_id,
                         file_info=file_info,
-                        total_time=api_result.get('processing_time', 0)
+                        total_time=api_result.get('processing_time', 0),
+                        findings=findings
                     )
             else:
+                error_message = f"שגיאת שרת סימבולים: HTTP {response.status_code} - {response.text}"
+                findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] {error_message}")
                 return SymbolicationResult(
                     success=False,
-                    message=f"שגיאת שרת סימבולים: HTTP {response.status_code}",
+                    message=error_message,
                     symbolicated_output=crash_content,
                     analysis_id=analysis_id,
-                    file_info=file_info
+                    file_info=file_info,
+                    findings=findings
                 )
                 
     except Exception as e:
-        logger.error(f"Symbolication error: {e}")
+        logger.error(f"Symbolication error: {e}", exc_info=True)
+        error_message = f"Connection error: {str(e)}"
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] {error_message}")
         return SymbolicationResult(
             success=False,
-            message=f"Connection error: {str(e)}",
+            message=error_message,
             symbolicated_output=crash_content,
             analysis_id=analysis_id,
-            file_info=parse_ips_file(crash_content)
+            file_info=parse_ips_file(crash_content),
+            findings=findings
         )
 
 # Web UI Routes
@@ -333,17 +366,15 @@ async def web_ui_upload(request: Request, file: UploadFile = File(...)):
         crash_content = content.decode('utf-8', errors='ignore')
         
         result = await symbolicate_via_api(crash_content)
-        result_dict = result.model_dump()
         
         # Save results
         results_file = TEMP_DIR / f"{result.analysis_id}_results.json"
         with open(results_file, 'w', encoding='utf-8') as f:
-            json.dump(result_dict, f, indent=2, ensure_ascii=False)
+            json.dump(result.model_dump(), f, indent=2, ensure_ascii=False)
         
         return templates.TemplateResponse("results.html", {
             "request": request,
             "result": result,
-            "result_dict": result_dict,
             "original_filename": file.filename
         })
         

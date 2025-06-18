@@ -321,9 +321,8 @@ class InternalS3Manager:
         file_info = self._parse_ipsw_filename(filename)
         
         if file_info:
-            cache_key = f"{file_info['device']}_{file_info['version']}"
-            if file_info['build']:
-                cache_key += f"_{file_info['build']}"
+            # Use a more robust cache key including the original filename to avoid collisions
+            cache_key = hashlib.sha1(filename.encode()).hexdigest()
             
             logger.info(f"Parsed file info: {file_info}, cache_key: {cache_key}")
             
@@ -343,18 +342,17 @@ class InternalS3Manager:
     def _parse_ipsw_filename(self, filename: str) -> Optional[Dict[str, str]]:
         """Parse IPSW filename to extract device, version, and build info"""
         try:
-            # Extended patterns for internal S3 naming conventions
+            # Prioritize patterns that include the build number
             patterns = [
-                # iPhone15,2_18.5_22F76_Restore-2.ipsw (with numbered suffix)
-                r'([^_/]+)_(\d+\.\d+(?:\.\d+)?)_([A-Z0-9]+)_Restore-\d+\.ipsw',
                 # iPhone15,2_17.4_21E219_Restore.ipsw
                 r'([^_/]+)_(\d+\.\d+(?:\.\d+)?)_([A-Z0-9]+)_.*\.ipsw',
                 # iPhone_15_Pro_17.4_21E219_Restore.ipsw
                 r'([^/]+?)_(\d+\.\d+(?:\.\d+)?)_([A-Z0-9]+).*\.ipsw',
-                # iPhone15,2_17.4_Restore.ipsw (no build)
-                r'([^_/]+)_(\d+\.\d+(?:\.\d+)?)_.*\.ipsw',
                 # iPhone15,2-17.4-21E219.ipsw (dash separator)
                 r'([^-/]+)-(\d+\.\d+(?:\.\d+)?)-([A-Z0-9]+).*\.ipsw',
+                # Fallback for patterns without a build number
+                # iPhone15,2_17.4_Restore.ipsw 
+                r'([^_/]+)_(\d+\.\d+(?:\.\d+)?)_.*\.ipsw',
                 # Simple format: iPhone_17.4.ipsw
                 r'([^/]+?)[-_](\d+\.\d+(?:\.\d+)?).*\.ipsw'
             ]
@@ -364,12 +362,12 @@ class InternalS3Manager:
                 if match:
                     groups = match.groups()
                     return {
-                        'device': groups[0],
+                        'device': groups[0].replace('_', ' '), # Normalize device name
                         'version': groups[1],
                         'build': groups[2] if len(groups) > 2 else None
                     }
             
-            logger.warning(f"Could not parse IPSW filename: {filename}")
+            logger.warning(f"Could not parse IPSW filename with any known pattern: {filename}")
             return None
             
         except Exception as e:
@@ -383,27 +381,42 @@ class InternalS3Manager:
             await self.refresh_bucket_cache()
     
     async def find_ipsw(self, device_model: str, os_version: str, build_number: Optional[str] = None) -> Optional[Dict]:
-        """Find IPSW file in internal S3 bucket"""
+        """Find IPSW file in internal S3 bucket with improved matching logic."""
         await self._ensure_cache_fresh()
         
-        # Try exact match first
-        cache_keys = [
-            f"{device_model}_{os_version}_{build_number}" if build_number else None,
-            f"{device_model}_{os_version}",
-        ]
+        logger.info(f"Searching for IPSW with: model='{device_model}', version='{os_version}', build='{build_number}'")
         
-        for cache_key in cache_keys:
-            if cache_key and cache_key in self._bucket_cache:
-                return self._bucket_cache[cache_key]
+        # Create a list of candidate search terms for the device model
+        # This handles cases like "iPhone 16" vs "iPhone17,3"
+        device_candidates = {device_model.lower().replace(' ', '')}
+        # Add identifier-like searches, e.g., "iphone15,2" -> "iphone152"
+        device_candidates.add(re.sub(r'[^a-z0-9]', '', device_model.lower()))
         
-        # Try fuzzy matching for internal naming conventions
-        for key, file_info in self._bucket_cache.items():
-            if (self._device_matches(file_info['device'], device_model) and 
-                file_info['version'] == os_version):
-                if build_number is None or file_info['build'] == build_number:
+        logger.info(f"Generated device candidates for search: {device_candidates}")
+
+        # Iterate through all cached files and check for a match
+        for file_info in self._bucket_cache.values():
+            # Normalize the device name from the cache
+            cached_device_norm = file_info['device'].lower().replace(' ', '').replace('_', '')
+            cached_device_norm_no_comma = re.sub(r'[^a-z0-9]', '', cached_device_norm)
+            
+            # Check if any candidate matches the cached device name
+            device_match_found = False
+            for candidate in device_candidates:
+                if candidate in cached_device_norm or candidate in cached_device_norm_no_comma:
+                    device_match_found = True
+                    break
+            
+            if device_match_found:
+                # Now check for version and build match
+                version_matches = file_info['version'] == os_version
+                build_matches = build_number is None or file_info['build'] == build_number
+                
+                if version_matches and build_matches:
+                    logger.info(f"Found a matching IPSW file: {file_info['key']}")
                     return file_info
         
-        logger.warning(f"IPSW not found in internal S3: {device_model} {os_version} {build_number}")
+        logger.warning(f"IPSW not found for: {device_model} {os_version} {build_number}")
         return None
     
     def _device_matches(self, s3_device: str, target_device: str) -> bool:
@@ -432,24 +445,22 @@ class InternalS3Manager:
     async def download_ipsw(self, device_model: str, os_version: str, build_number: Optional[str] = None) -> Tuple[bool, str, Optional[str]]:
         """Download IPSW file from internal S3 using HTTP API"""
         try:
-            # Check if already downloaded locally
-            local_pattern = f"*{device_model}*{os_version}*.ipsw"
-            existing_files = list(self.downloads_dir.glob(local_pattern))
-            
-            if existing_files:
-                existing_file = existing_files[0]
-                logger.info(f"Using existing IPSW: {existing_file}")
-                return True, f"Using cached IPSW: {existing_file.name}", str(existing_file)
-            
-            # Find file in S3
+            # Find file in S3 first
             file_info = await self.find_ipsw(device_model, os_version, build_number)
             if not file_info:
-                return False, f"IPSW not found in internal S3: {device_model} {os_version}", None
+                return False, f"IPSW not found in internal S3 for: {device_model} {os_version}", None
+            
+            # Generate a consistent local filename based on the S3 key
+            # This helps in reliably finding cached files
+            local_filename = Path(file_info['key']).name
+            local_path = self.downloads_dir / local_filename
+
+            # Check if the file already exists and is not empty
+            if local_path.exists() and local_path.stat().st_size > 0:
+                logger.info(f"Using existing cached IPSW: {local_path}")
+                return True, f"Using cached IPSW: {local_path.name}", str(local_path)
             
             # Download file using HTTP API
-            local_filename = f"{device_model}_{os_version}_{build_number or 'unknown'}_{file_info['key']}"
-            local_path = self.downloads_dir / local_filename
-            
             logger.info(f"Downloading IPSW via HTTP API: {file_info['key']}")
             
             success = await self._download_file_http(file_info['key'], local_path)
@@ -469,9 +480,15 @@ class InternalS3Manager:
         try:
             # Try minio client first (more reliable)
             logger.info("Attempting download with minio client")
-            success = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: asyncio.run(self._download_file_minio_sync(s3_key, local_path))
-            )
+            # Use asyncio.to_thread in Python 3.9+ for better async behavior
+            if hasattr(asyncio, 'to_thread'):
+                success = await asyncio.to_thread(self._download_file_minio_sync, s3_key, local_path)
+            else:
+                # Fallback for older Python versions
+                loop = asyncio.get_event_loop()
+                success = await loop.run_in_executor(
+                    None, self._download_file_minio_sync, s3_key, local_path
+                )
             
             if success:
                 return True
