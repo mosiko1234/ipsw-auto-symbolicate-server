@@ -39,7 +39,7 @@ SYMBOLS_DIR = os.getenv('SYMBOLS_DIR', '/app/data/symbols')
 IPSW_BINARY = os.getenv('IPSW_BINARY', 'ipsw')
 
 # Database configuration
-DATABASE_URL = "postgresql://symbols_user:symbols_pass@symbols-postgres:5432/symbols"
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://symbols_user:symbols_password@postgres:5432/symbols')
 
 # Global stats
 stats = {
@@ -80,7 +80,25 @@ class DatabaseManager:
     async def init_pool(self):
         """Initialize database connection pool"""
         try:
-            self.pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+            # Use psycopg2 for synchronous connections instead of asyncpg
+            import psycopg2
+            import psycopg2.pool
+            from urllib.parse import urlparse
+            
+            # Parse DATABASE_URL
+            url = urlparse(DATABASE_URL)
+            db_config = {
+                'host': url.hostname,
+                'port': url.port or 5432,
+                'database': url.path[1:],  # Remove leading /
+                'user': url.username,
+                'password': url.password
+            }
+            
+            # Create connection pool
+            self.pool = psycopg2.pool.SimpleConnectionPool(
+                minconn=2, maxconn=10, **db_config
+            )
             logger.info("Database connection pool initialized")
         except Exception as e:
             logger.error(f"Failed to initialize database pool: {e}")
@@ -89,25 +107,30 @@ class DatabaseManager:
     async def close_pool(self):
         """Close database connection pool"""
         if self.pool:
-            await self.pool.close()
+            self.pool.closeall()
     
-    async def save_symbols_metadata(self, device_identifier: str, ios_version: str, 
+    def save_symbols_metadata(self, device_identifier: str, ios_version: str, 
                                   build_version: str, kernel_path: str, symbols_path: str):
         """Save symbols metadata to database"""
         try:
-            async with self.pool.acquire() as conn:
-                # Insert or update symbols metadata
-                await conn.execute("""
-                    INSERT INTO symbols (device_identifier, ios_version, build_version, kernel_path, symbols_path)
-                    VALUES ($1, $2, $3, $4, $5)
-                    ON CONFLICT (device_identifier, ios_version, build_version)
-                    DO UPDATE SET 
-                        kernel_path = EXCLUDED.kernel_path,
-                        symbols_path = EXCLUDED.symbols_path,
-                        updated_at = CURRENT_TIMESTAMP
-                """, device_identifier, ios_version, build_version, kernel_path, symbols_path)
-                
-                logger.info(f"Saved symbols metadata for {device_identifier} {ios_version}")
+            conn = self.pool.getconn()
+            try:
+                with conn.cursor() as cur:
+                    # Insert or update symbols metadata
+                    cur.execute("""
+                        INSERT INTO symbols (device_identifier, ios_version, build_version, kernel_path, symbols_path)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (device_identifier, ios_version, build_version)
+                        DO UPDATE SET 
+                            kernel_path = EXCLUDED.kernel_path,
+                            symbols_path = EXCLUDED.symbols_path,
+                            updated_at = CURRENT_TIMESTAMP
+                    """, (device_identifier, ios_version, build_version, kernel_path, symbols_path))
+                    conn.commit()
+                    
+                    logger.info(f"Saved symbols metadata for {device_identifier} {ios_version}")
+            finally:
+                self.pool.putconn(conn)
         except Exception as e:
             logger.error(f"Failed to save symbols metadata: {e}")
     
@@ -554,10 +577,13 @@ async def auto_ensure_symbols_available(device_model: str, ios_version: str, bui
         
         # Search for matching IPSW in S3
         try:
+            logger.info(f"Searching for IPSW files in S3 for {device_model} {ios_version}")
             available_ipsws = await s3_manager.list_available_ipsw(device_filter=device_model)
+            logger.info(f"Found {len(available_ipsws)} IPSW files in S3")
             
             matching_ipsw = None
             for ipsw in available_ipsws:
+                logger.info(f"Checking IPSW: {ipsw}")
                 if (ipsw.get('device') == device_model and 
                     ipsw.get('version') == ios_version):
                     if build_number and ipsw.get('build') == build_number:
@@ -576,7 +602,8 @@ async def auto_ensure_symbols_available(device_model: str, ios_version: str, bui
                         break
             
             if not matching_ipsw:
-                return False, f"No matching IPSW found in S3 for {device_model} {ios_version}"
+                available_list = [f"{f.get('device')}_{f.get('version')}" for f in available_ipsws]
+                return False, f"No matching IPSW found in S3 for {device_model} {ios_version}. Available: {available_list}"
             
             logger.info(f"Found matching IPSW: {matching_ipsw.get('filename')}")
             
@@ -775,10 +802,13 @@ async def get_cache_stats():
 
 @app.get("/v1/ipsws")
 async def list_ipsws():
-    """List available IPSW files"""
+    """List available IPSW files (both local and S3)"""
     try:
         ipsw_files = []
+        
+        # List local IPSW files (already downloaded)
         downloads_path = Path(DOWNLOADS_DIR)
+        local_files = set()
         
         for ipsw_file in downloads_path.glob('*.ipsw'):
             if ipsw_file.is_file():
@@ -787,8 +817,27 @@ async def list_ipsws():
                     'filename': ipsw_file.name,
                     'path': str(ipsw_file),
                     'size_mb': ipsw_file.stat().st_size / (1024 * 1024),
+                    'location': 'local',
                     'info': info or {}
                 })
+                local_files.add(ipsw_file.name)
+        
+        # List S3 IPSW files (available for download)
+        try:
+            s3_files = await s3_manager.list_available_ipsw()
+            for s3_file in s3_files:
+                if s3_file.get('filename') not in local_files:
+                    ipsw_files.append({
+                        'filename': s3_file.get('filename', 'unknown'),
+                        'device': s3_file.get('device', 'unknown'),
+                        'version': s3_file.get('version', 'unknown'),
+                        'build': s3_file.get('build', 'unknown'),
+                        'size_mb': s3_file.get('size_mb', 0),
+                        'location': 's3',
+                        'info': {}
+                    })
+        except Exception as s3_error:
+            logger.warning(f"Failed to list S3 IPSWs: {s3_error}")
         
         return {'ipsws': ipsw_files, 'count': len(ipsw_files)}
     except Exception as e:

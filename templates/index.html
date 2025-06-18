@@ -1,288 +1,453 @@
 {% extends "base.html" %}
 
-{% block title %}Upload Crash File - IPSW Symbol Server{% endblock %}
+{% block title %}העלאת קובץ IPS/Crash | IPSW Symbol Server{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto">
-    <!-- Header -->
-    <div class="text-center mb-8">
-        <h2 class="text-3xl font-bold text-gray-900 mb-4">iOS Crash Analysis</h2>
-        <p class="text-lg text-gray-600 max-w-2xl mx-auto">
-            Upload your .ips crash files to get detailed kernel symbolication and analysis.
-            Our system supports iOS 14-19 (Darwin 20-25.0) with kernel signatures and real IPSW files for some devices.
-        </p>
+<div class="card-header">
+    <h1 class="mb-0">
+        <i class="fas fa-upload"></i>
+        ניתוח קבצי IPS/Crash עם Symbolication
+    </h1>
+    <p class="mb-0 mt-2">העלה קבצי .ips או crash logs לקבלת ניתוח מלא עם סמלים מפוענחים</p>
+</div>
+
+<div class="card-body">
+    <!-- API Status Check -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="alert alert-info d-flex align-items-center" id="api-status">
+                <div class="spinner-border spinner-border-sm me-2" role="status">
+                    <span class="visually-hidden">בודק...</span>
+                </div>
+                בודק זמינות שרת הסמלים...
+            </div>
+        </div>
     </div>
 
-    <!-- Features Overview -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 text-center">
-            <div class="text-blue-500 text-2xl mb-3">🔍</div>
-            <h3 class="font-semibold text-gray-900 mb-2">Kernel Symbolication</h3>
-            <p class="text-sm text-gray-600">Convert unknown addresses to readable function names</p>
-        </div>
-        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 text-center">
-            <div class="text-green-500 text-2xl mb-3">⚡</div>
-            <h3 class="font-semibold text-gray-900 mb-2">Fast Processing</h3>
-            <p class="text-sm text-gray-600">Average processing time under 0.3 seconds</p>
-        </div>
-        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 text-center">
-            <div class="text-purple-500 text-2xl mb-3">📊</div>
-            <h3 class="font-semibold text-gray-900 mb-2">Detailed Analysis</h3>
-            <p class="text-sm text-gray-600">Comprehensive breakdown of crash data</p>
-        </div>
+    <!-- Error Messages -->
+    {% if error %}
+    <div class="alert alert-danger mb-4">
+        <i class="fas fa-exclamation-circle"></i>
+        {{ error }}
     </div>
+    {% endif %}
 
     <!-- Upload Form -->
-    <div class="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden">
-        <div class="px-6 py-4 bg-gray-50 border-b border-gray-200">
-            <h3 class="text-lg font-semibold text-gray-900">Upload Crash File</h3>
+    <form method="POST" action="/ui/upload" enctype="multipart/form-data" id="upload-form">
+        <!-- File Upload Area -->
+        <div class="upload-area" id="upload-area">
+            <div class="upload-content">
+                <i class="fas fa-cloud-upload-alt fa-4x text-primary mb-3"></i>
+                <h4>גרור קובץ IPS לכאן או לחץ לבחירה</h4>
+                <p class="text-muted mb-3">
+                    תומך בקבצים: <span class="badge bg-primary">.ips</span> <span class="badge bg-secondary">.crash</span> <span class="badge bg-secondary">.txt</span> <span class="badge bg-secondary">.json</span> <span class="badge bg-secondary">.log</span> <span class="badge bg-secondary">.panic</span>
+                </p>
+                <p class="small text-muted">
+                    גודל מקסימלי: 50MB
+                </p>
+            </div>
+            <div class="file-preview" id="file-preview" style="display: none;">
+                <div class="d-flex align-items-center">
+                    <i class="fas fa-file-alt fa-2x text-success me-3"></i>
+                    <div>
+                        <div class="fw-bold" id="file-name"></div>
+                        <div class="small text-muted" id="file-size"></div>
+                        <div class="small text-info" id="file-type"></div>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-danger ms-auto" onclick="clearFile()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
         </div>
-        
-        <form action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data" class="p-6" id="upload-form">
-            <div class="mb-6">
-                <!-- Upload Area -->
-                <div id="upload-area" class="file-upload-area rounded-lg p-8 text-center cursor-pointer" onclick="document.getElementById('file-input').click();">
-                    <div class="space-y-4">
-                        <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
-                            <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                        </svg>
-                        
-                        <div>
-                            <div class="cursor-pointer block">
-                                <span class="text-lg font-medium text-gray-900">Click to upload</span>
-                                <span class="text-gray-500"> or drag and drop</span>
-                            </div>
-                            <p class="text-sm text-gray-500 mt-1">
-                                Supported formats: .ips, .crash, .txt, .json (max 50MB)
-                            </p>
-                        </div>
-                        
-                        <input id="file-input" name="file" type="file" accept=".ips,.crash,.txt,.json" class="hidden" required onchange="handleFileSelect(this)">
-                        
-                        <!-- Alternative upload button for testing -->
-                        <div class="mt-4 text-center">
-                            <label for="file-input-alt" class="inline-flex items-center px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 cursor-pointer">
-                                📁 Alternative: Choose File
-                            </label>
-                            <input id="file-input-alt" type="file" accept=".ips,.crash,.txt,.json" class="hidden" onchange="copyFileToMainInput(this)">
-                        </div>
-                        
-                        <!-- Selected file display -->
-                        <div id="filename-display" class="hidden">
-                            <div class="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800">
-                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                                </svg>
-                                <span class="filename">No file selected</span>
-                            </div>
-                        </div>
+
+        <!-- Hidden File Input -->
+        <input type="file" 
+               name="file" 
+               class="file-input" 
+               accept=".ips,.crash,.txt,.json,.log,.panic"
+               required>
+
+        <!-- Upload Button -->
+        <div class="text-center mt-4">
+            <button type="submit" class="btn btn-primary btn-lg" id="upload-btn">
+                <i class="fas fa-rocket"></i>
+                בצע Symbolication
+            </button>
+        </div>
+    </form>
+
+    <!-- Loading State -->
+    <div class="text-center mt-4 loading" id="loading">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">מעבד...</span>
+        </div>
+        <p class="mt-3">מעבד את קובץ ה-IPS ומבצע symbolication...</p>
+        <p class="small text-muted">זה יכול לקחת מספר דקות בהתאם לגודל הקובץ</p>
+        <div class="progress mt-3" style="height: 8px; max-width: 400px; margin: 0 auto;">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div>
+        </div>
+    </div>
+
+    <!-- Process Steps -->
+    <div class="row mt-5">
+        <div class="col-12">
+            <h5><i class="fas fa-list-check text-primary"></i> תהליך הניתוח</h5>
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="process-step">
+                        <div class="step-number">1</div>
+                        <h6>ניתוח קובץ IPS</h6>
+                        <p class="small">זיהוי פרטי המכשיר, גרסת iOS ופרטי הקריסה</p>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="process-step">
+                        <div class="step-number">2</div>
+                        <h6>איתור IPSW</h6>
+                        <p class="small">חיפוש קובץ IPSW מתאים במאגר הסמלים</p>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="process-step">
+                        <div class="step-number">3</div>
+                        <h6>Symbolication</h6>
+                        <p class="small">פענוח כתובות הזיכרון לשמות פונקציות</p>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="process-step">
+                        <div class="step-number">4</div>
+                        <h6>תוצאות</h6>
+                        <p class="small">הצגת התוצאות ואפשרות הורדה</p>
                     </div>
                 </div>
             </div>
-
-            <!-- Submit Button -->
-            <div class="flex justify-center">
-                <button type="submit" class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
-                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-                    </svg>
-                    Analyze Crash File
-                </button>
-            </div>
-        </form>
-    </div>
-
-    <!-- Supported Formats Info -->
-    <div class="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-        <h4 class="text-sm font-semibold text-blue-900 mb-3">📋 Supported File Formats</h4>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-800">
-            <div>
-                <strong>.ips files</strong> - Native iOS crash reports
-            </div>
-            <div>
-                <strong>.crash files</strong> - Legacy crash format
-            </div>
-            <div>
-                <strong>.txt files</strong> - Plain text crash logs
-            </div>
-            <div>
-                <strong>.json files</strong> - JSON formatted crash data
-            </div>
-        </div>
-        
-        <div class="mt-4 text-sm text-blue-700">
-            <strong>Kernel Signatures:</strong> iOS 14-19 (Darwin 20-25.0) • <strong>Full IPSW Support:</strong> iPhone 15,2 & 15,4 (iOS 18.5)
         </div>
     </div>
 
-    <!-- Support Matrix -->
-    <div class="mt-8 bg-yellow-50 border border-yellow-200 rounded-lg p-6">
-        <h4 class="text-sm font-semibold text-yellow-900 mb-3">⚠️ What Will Work?</h4>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-yellow-800">
-            <div>
-                <strong>✅ Always Works:</strong><br>
-                • Kernel address extraction<br>
-                • Basic crash analysis<br>
-                • Performance metrics
+    <!-- Features -->
+    <div class="row mt-5">
+        <div class="col-md-4">
+            <div class="metric-card text-center">
+                <i class="fas fa-bolt fa-2x text-warning mb-2"></i>
+                <h6>מהיר וחכם</h6>
+                <p class="small mb-0">זיהוי אוטומטי של פרטי המכשיר והעמסת הסמלים המתאימים</p>
             </div>
-            <div>
-                <strong>🎯 Full Symbolication:</strong><br>
-                • iPhone 15,2 & 15,4<br>
-                • iOS 18.5 (22F76)<br>
-                • Complete symbol resolution
+        </div>
+        <div class="col-md-4">
+            <div class="metric-card text-center">
+                <i class="fas fa-database fa-2x text-info mb-2"></i>
+                <h6>מאגר עשיר</h6>
+                <p class="small mb-0">תמיכה במגוון רחב של מכשירים וגרסאות iOS</p>
             </div>
-            <div>
-                <strong>⚠️ Partial Support:</strong><br>
-                • Other iOS versions (14-19)<br>
-                • Other iPhone models<br>
-                • Addresses found, limited symbols
-            </div>
-            <div>
-                <strong>📱 All Devices:</strong><br>
-                • Will extract kernel addresses<br>
-                • Show device info<br>
-                • Basic crash structure
+        </div>
+        <div class="col-md-4">
+            <div class="metric-card text-center">
+                <i class="fas fa-download fa-2x text-success mb-2"></i>
+                <h6>תוצאות להורדה</h6>
+                <p class="small mb-0">קבל את התוצאות בפורמט JSON או TXT להמשך עבודה</p>
             </div>
         </div>
     </div>
 
-    <!-- Recent System Stats -->
-    <div class="mt-8 grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 text-center">
-            <div class="text-2xl font-bold text-green-600">21,207</div>
-            <div class="text-sm text-gray-600">Kernel Symbols</div>
+    <!-- Supported Devices -->
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="metric-card">
+                <h5><i class="fas fa-mobile-alt text-primary"></i> מכשירים נתמכים</h5>
+                <div class="row">
+                    <div class="col-6">
+                        <ul class="mb-0 small">
+                            <li>iPhone 15 Series</li>
+                            <li>iPhone 14 Series</li>
+                            <li>iPhone 13 Series</li>
+                            <li>iPhone 12 Series</li>
+                        </ul>
+                    </div>
+                    <div class="col-6">
+                        <ul class="mb-0 small">
+                            <li>iPad Pro</li>
+                            <li>iPad Air</li>
+                            <li>iPad Mini</li>
+                            <li>ועוד מכשירי iOS...</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
         </div>
-        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 text-center">
-            <div class="text-2xl font-bold text-blue-600">18GB</div>
-            <div class="text-sm text-gray-600">IPSW Data</div>
+        <div class="col-md-6">
+            <div class="metric-card">
+                <h5><i class="fas fa-bug text-danger"></i> סוגי Crash נתמכים</h5>
+                <ul class="mb-0 small">
+                    <li><span class="badge bg-danger">210</span> Kernel Panic - קריסת מערכת</li>
+                    <li><span class="badge bg-warning">309</span> Application Crash - קריסת אפליקציה</li>
+                    <li><span class="badge bg-info">109</span> Legacy Crash - קריסה מיושנת</li>
+                    <li><span class="badge bg-secondary">Custom</span> System Library Crashes</li>
+                </ul>
+            </div>
         </div>
-        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 text-center">
-            <div class="text-2xl font-bold text-purple-600">0.3s</div>
-            <div class="text-sm text-gray-600">Avg Processing</div>
+    </div>
+
+    <!-- Instructions -->
+    <div class="mt-5">
+        <h5><i class="fas fa-info-circle text-primary"></i> הוראות שימוש מפורטות</h5>
+        <div class="row">
+            <div class="col-md-6">
+                <h6>איך להוציא קובץ IPS:</h6>
+                <ol class="small">
+                    <li><strong>מ-iPhone:</strong> הגדרות → פרטיות ואבטחה → Analytics & Improvements → Analytics Data</li>
+                    <li><strong>מ-Xcode:</strong> Window → Devices and Simulators → View Device Logs</li>
+                    <li><strong>מ-Console.app:</strong> macOS Console application</li>
+                    <li><strong>מ-iTunes/Finder:</strong> בעת סנכרון עם Mac</li>
+                </ol>
+            </div>
+            <div class="col-md-6">
+                <h6>איך להשתמש במערכת:</h6>
+                <ol class="small">
+                    <li><strong>העלה:</strong> גרור את קובץ ה-IPS או לחץ לבחירה</li>
+                    <li><strong>המתן:</strong> המערכת תזהה את פרטי המכשיר ותמצא IPSW מתאים</li>
+                    <li><strong>קבל תוצאות:</strong> ניתוח מפורט עם איכות symbolication</li>
+                    <li><strong>הורד:</strong> שמור את התוצאות כ-JSON או TXT</li>
+                </ol>
+            </div>
         </div>
-        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 text-center">
-            <div class="text-2xl font-bold text-orange-600">4</div>
-            <div class="text-sm text-gray-600">Address Types</div>
+    </div>
+
+    <!-- Tips -->
+    <div class="mt-4">
+        <div class="alert alert-success">
+            <h6><i class="fas fa-lightbulb"></i> טיפים להצלחה</h6>
+            <ul class="mb-0 small">
+                <li>קבצי IPS חדשים (iOS 15+) מכילים יותר מידע ונותנים תוצאות טובות יותר</li>
+                <li>ודא שקובץ ה-IPS מכיל את פרטי המכשיר וגרסת iOS</li>
+                <li>אם איכות ה-symbolication נמוכה, יתכן שחסר קובץ IPSW מתאים במערכת</li>
+                <li>סמלים לא מזוהים יכולים להצביע על קוד אפליקציה או ספריות צד שלישי</li>
+            </ul>
         </div>
     </div>
 </div>
+{% endblock %}
 
+{% block extra_js %}
 <script>
-// Handle file selection and display
-function handleFileSelect(input) {
-    console.log('File selected:', input.files[0]);
-    const filenameDisplay = document.getElementById('filename-display');
-    if (input.files && input.files.length > 0) {
-        const filename = input.files[0].name;
-        const fileSize = (input.files[0].size / 1024 / 1024).toFixed(2);
-        console.log(`File: ${filename}, Size: ${fileSize} MB`);
+// API Status Check
+async function checkApiStatus() {
+    try {
+        const response = await fetch('/api/status');
+        const data = await response.json();
         
-        const filenameSpan = filenameDisplay.querySelector('.filename');
-        if (filenameSpan) {
-            filenameSpan.textContent = `${filename} (${fileSize} MB)`;
-            filenameDisplay.classList.remove('hidden');
+        const statusDiv = document.getElementById('api-status');
+        if (data.status === 'online') {
+            statusDiv.className = 'alert alert-success d-flex align-items-center';
+            statusDiv.innerHTML = '<i class="fas fa-check-circle me-2"></i>שרת הסמלים פעיל ומוכן לעבודה';
+        } else {
+            statusDiv.className = 'alert alert-warning d-flex align-items-center';
+            statusDiv.innerHTML = '<i class="fas fa-exclamation-triangle me-2"></i>שרת הסמלים לא זמין כרגע';
         }
+    } catch (error) {
+        const statusDiv = document.getElementById('api-status');
+        statusDiv.className = 'alert alert-danger d-flex align-items-center';
+        statusDiv.innerHTML = '<i class="fas fa-times-circle me-2"></i>שגיאה בחיבור לשרת הסמלים';
     }
 }
 
-// Copy file from alternative input to main input
-function copyFileToMainInput(altInput) {
-    console.log('Alternative input used:', altInput.files[0]);
-    const mainInput = document.getElementById('file-input');
-    if (altInput.files && altInput.files.length > 0 && mainInput) {
-        // Create a new FileList
-        const dt = new DataTransfer();
-        dt.items.add(altInput.files[0]);
-        mainInput.files = dt.files;
-        
-        // Trigger the change event on main input
-        handleFileSelect(mainInput);
-    }
+// File handling
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// Simple function to open file dialog
-function openFileDialog() {
-    console.log('🔍 Opening file dialog...');
-    const fileInput = document.getElementById('file-input');
-    if (fileInput) {
-        // Create a new click event that is trusted
-        const event = new MouseEvent('click', {
-            view: window,
-            bubbles: true,
-            cancelable: true
-        });
-        fileInput.dispatchEvent(event);
-        console.log('✅ File dialog triggered');
-    } else {
-        console.error('❌ File input not found');
-    }
+function getFileTypeDescription(filename) {
+    const ext = filename.split('.').pop().toLowerCase();
+    const types = {
+        'ips': 'קובץ IPS (מומלץ)',
+        'crash': 'קובץ Crash Log',
+        'txt': 'קובץ טקסט',
+        'json': 'קובץ JSON',
+        'log': 'קובץ Log',
+        'panic': 'קובץ Kernel Panic'
+    };
+    return types[ext] || 'קובץ לא מזוהה';
 }
 
-// Initialize upload functionality when DOM is ready
+function showFilePreview(file) {
+    const uploadArea = document.querySelector('.upload-content');
+    const preview = document.getElementById('file-preview');
+    
+    document.getElementById('file-name').textContent = file.name;
+    document.getElementById('file-size').textContent = formatFileSize(file.size);
+    document.getElementById('file-type').textContent = getFileTypeDescription(file.name);
+    
+    uploadArea.style.display = 'none';
+    preview.style.display = 'block';
+}
+
+function clearFile() {
+    const fileInput = document.querySelector('.file-input');
+    const uploadArea = document.querySelector('.upload-content');
+    const preview = document.getElementById('file-preview');
+    
+    fileInput.value = '';
+    uploadArea.style.display = 'block';
+    preview.style.display = 'none';
+}
+
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('🚀 Initializing upload functionality...');
+    checkApiStatus();
     
-    const uploadArea = document.getElementById('upload-area');
-    const fileInput = document.getElementById('file-input');
     const form = document.getElementById('upload-form');
+    const uploadArea = document.getElementById('upload-area');
+    const fileInput = document.querySelector('.file-input');
+    const uploadBtn = document.getElementById('upload-btn');
+    const loading = document.getElementById('loading');
     
-    if (!uploadArea || !fileInput) {
-        console.error('❌ Upload elements not found!');
-        return;
-    }
-    
-    console.log('✅ Upload elements found');
-    
-    // Drag and drop handlers
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-        uploadArea.addEventListener(eventName, preventDefaults, false);
+    // Drag and drop functionality
+    uploadArea.addEventListener('click', function() {
+        if (document.querySelector('.upload-content').style.display !== 'none') {
+            fileInput.click();
+        }
     });
-
-    function preventDefaults(e) {
+    
+    uploadArea.addEventListener('dragover', function(e) {
         e.preventDefault();
-        e.stopPropagation();
-    }
-
-    ['dragenter', 'dragover'].forEach(eventName => {
-        uploadArea.addEventListener(eventName, () => uploadArea.classList.add('dragover'), false);
+        uploadArea.classList.add('dragover');
     });
-
-    ['dragleave', 'drop'].forEach(eventName => {
-        uploadArea.addEventListener(eventName, () => uploadArea.classList.remove('dragover'), false);
+    
+    uploadArea.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
     });
-
+    
     uploadArea.addEventListener('drop', function(e) {
-        console.log('📂 Files dropped');
-        const dt = e.dataTransfer;
-        const files = dt.files;
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
         
+        const files = e.dataTransfer.files;
         if (files.length > 0) {
             fileInput.files = files;
-            handleFileSelect(fileInput);
+            fileInput.dispatchEvent(new Event('change'));
         }
-    }, false);
+    });
     
-    // Form submit handler
-    if (form) {
-        form.addEventListener('submit', function(e) {
-            if (!fileInput.files || fileInput.files.length === 0) {
-                e.preventDefault();
-                alert('אנא בחר קובץ לפני ההעלאה');
-                return false;
+    // File input change
+    fileInput.addEventListener('change', function() {
+        if (this.files.length > 0) {
+            const file = this.files[0];
+            const maxSize = 50 * 1024 * 1024; // 50MB
+            
+            if (file.size > maxSize) {
+                alert('הקובץ גדול מדי. גודל מקסימלי: 50MB');
+                this.value = '';
+                clearFile();
+                return;
             }
             
-            console.log('📤 Form submitting with file:', fileInput.files[0].name);
-            
-            // Show loading indicator
-            const submitBtn = form.querySelector('button[type="submit"]');
-            if (submitBtn) {
-                submitBtn.innerHTML = '<svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>מעבד...';
-                submitBtn.disabled = true;
-            }
-        });
-    }
+            showFilePreview(file);
+        }
+    });
     
-    console.log('✅ Upload functionality initialized successfully');
+    // Form submission
+    form.addEventListener('submit', function(e) {
+        const fileInput = document.querySelector('.file-input');
+        
+        if (!fileInput.files.length) {
+            e.preventDefault();
+            alert('אנא בחר קובץ להעלאה');
+            return;
+        }
+        
+        // Show loading state
+        document.querySelector('.card-body').style.opacity = '0.7';
+        uploadBtn.style.display = 'none';
+        loading.classList.add('show');
+    });
 });
 </script>
+
+<style>
+.upload-area {
+    border: 2px dashed #dee2e6;
+    border-radius: 0.5rem;
+    padding: 3rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background: #f8f9fa;
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.upload-area:hover {
+    border-color: #0d6efd;
+    background: #e7f3ff;
+}
+
+.upload-area.dragover {
+    border-color: #0d6efd;
+    background: #e7f3ff;
+    transform: scale(1.02);
+}
+
+.file-input {
+    display: none;
+}
+
+.loading {
+    display: none;
+}
+
+.loading.show {
+    display: block;
+}
+
+.process-step {
+    text-align: center;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.step-number {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #0d6efd;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 1rem;
+    font-weight: bold;
+}
+
+.file-preview {
+    padding: 1.5rem;
+    background: #e7f3ff;
+    border-radius: 0.5rem;
+    border: 2px solid #0d6efd;
+}
+
+.metric-card {
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.badge {
+    margin: 0 2px;
+}
+</style>
 {% endblock %} 

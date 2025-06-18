@@ -1,140 +1,55 @@
 # =============================================================================
-# IPSW Auto-Symbolication API - Multi-Architecture Docker Image
-# Optimized for airgap environment with flexible S3 configuration
+# IPSW Auto-Symbolication API with Web UI - Multi-Architecture Docker Image
 # =============================================================================
 
 FROM python:3.11-slim
 
 # Metadata
-LABEL maintainer="IT Team"
-LABEL description="IPSW Auto-Symbolication API for airgap networks"
-LABEL version="1.0"
-LABEL architecture="multi-arch"
+LABEL maintainer="Moshe Eliya"
+LABEL description="IPSW Auto-Symbolication API with integrated Web UI"
+LABEL version="3.1"
 
-# Build arguments for flexibility
-ARG TARGETPLATFORM
-ARG BUILDPLATFORM
-ARG TARGETARCH
-ARG TARGETOS
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    # Network tools
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    wget \
-    # Archive tools  
-    unzip \
-    tar \
-    gzip \
-    # SSL certificates
     ca-certificates \
-    # Process management
-    procps \
-    # Text processing
-    jq \
-    # Git (for potential future use)
-    git \
-    # Build tools (in case we need to compile anything)
-    build-essential \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Docker CLI for using blacktop/ipsw container
-RUN echo "Installing Docker CLI for container-based ipsw..." && \
-    curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add - && \
-    echo "deb [arch=$(dpkg --print-architecture)] https://download.docker.com/linux/debian bullseye stable" | tee /etc/apt/sources.list.d/docker.list && \
-    apt-get update && \
-    apt-get install -y docker-ce-cli && \
-    echo "Docker CLI installed successfully"
-
-# Create app user for security and add to docker group
-RUN groupadd -r ipsw && \
-    useradd -r -g ipsw -d /app -s /bin/bash ipsw && \
-    groupadd docker && \
-    usermod -a -G docker ipsw
+# Create a non-root user for security
+RUN useradd -ms /bin/bash appuser
 
 # Set working directory
 WORKDIR /app
 
-# Copy Python requirements first (for better caching)
+# Copy requirements file first for layer caching
 COPY requirements.txt .
 
-# Install Python dependencies with retry logic for airgap preparation
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --timeout 300 --retries 5 -r requirements.txt
+# Install Python dependencies
+# Adding a build argument to force re-install on demand
+ARG CACHE_BUSTER=1
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application source code
-COPY auto-symbolication-api.py .
-COPY s3_download_manager.py .
-COPY s3_download_manager_html.py .
+# Copy application code
+COPY api_with_ui.py .
 COPY internal_s3_manager.py .
-COPY symbol_server_manager.py .
+COPY templates/ templates/
 
-# Create necessary directories with proper permissions
-RUN mkdir -p /data/{downloads,logs,cache} && \
-    mkdir -p /symbols && \
-    mkdir -p /tmp/ipsw && \
-    chmod -R 777 /data && \
-    chown -R ipsw:ipsw /app /data /symbols /tmp/ipsw
+# Create necessary data directory and set permissions
+RUN mkdir -p /app/data/temp && chown -R appuser:appuser /app
 
-# Switch to non-root user (commented out for now due to permission issues)
-# USER ipsw
+# Switch to non-root user
+USER appuser
 
-# Environment variables with sensible defaults
+# Environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONPATH=/app
+ENV PORT=8000
 
-# Flexible S3 configuration (can be overridden at runtime)
-ENV S3_ENDPOINT=""
-ENV S3_BUCKET=""
-ENV S3_ACCESS_KEY=""
-ENV S3_SECRET_KEY=""
-ENV S3_REGION=""
-ENV S3_USE_SSL="true"
+EXPOSE 8000
 
-# Symbolication configuration  
-ENV SYMBOLS_DIR="/symbols"
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
-# Application settings
-ENV LOG_LEVEL="INFO"
-ENV API_PORT="8000"
-ENV API_HOST="0.0.0.0"
-
-# Performance settings
-ENV WORKERS="4"
-ENV MAX_DOWNLOAD_SIZE="10737418240"
-ENV DOWNLOAD_TIMEOUT="3600"
-
-# Health check that works in any environment
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:${API_PORT}/health || exit 1
-
-# Expose port (configurable)
-EXPOSE ${API_PORT}
-
-# Create entrypoint script for flexible startup
-RUN echo '#!/bin/bash\n\
-set -e\n\
-\n\
-echo "Starting IPSW Auto-Symbolication API..."\n\
-echo "Architecture: $(uname -m)"\n\
-echo "Python version: $(python --version)"\n\
-echo "Docker available: $(docker --version 2>/dev/null || echo \"Not available\")"\n\
-echo "IPSW container: $(docker run --rm blacktop/ipsw version 2>/dev/null || echo \"Will be downloaded on first use\")"\n\
-echo "S3 Endpoint: ${S3_ENDPOINT}"\n\
-echo "S3 Bucket: ${S3_BUCKET}"\n\
-echo "Symbols Dir: ${SYMBOLS_DIR}"\n\
-\n\
-# Validate required environment variables\n\
-if [ -z "$S3_ENDPOINT" ] || [ -z "$S3_BUCKET" ]; then\n\
-    echo "WARNING: S3_ENDPOINT and S3_BUCKET environment variables are required!"\n\
-    echo "Example: S3_ENDPOINT=https://s3.company.com S3_BUCKET=ipsw-files"\n\
-fi\n\
-\n\
-# Start the application\n\
-exec python auto-symbolication-api.py\n\
-' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
-
-# Use the entrypoint script
-ENTRYPOINT ["/app/entrypoint.sh"]
+# Command to run the application using uvicorn
+CMD ["uvicorn", "api_with_ui:app", "--host", "0.0.0.0", "--port", "8000"]

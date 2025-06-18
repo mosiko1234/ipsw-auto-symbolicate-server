@@ -13,10 +13,11 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install IPSW tool
-RUN curl -sSL https://github.com/blacktop/ipsw/releases/download/v3.1.523/ipsw_3.1.523_linux_amd64.tar.gz | \
-    tar -xz -C /usr/local/bin/ ipsw && \
-    chmod +x /usr/local/bin/ipsw
+# Install IPSW tool directly - download the binary
+RUN wget -O /tmp/ipsw.tar.gz https://github.com/blacktop/ipsw/releases/download/v3.1.613/ipsw_3.1.613_linux_x86_64.tar.gz && \
+    tar -xzf /tmp/ipsw.tar.gz -C /usr/local/bin/ && \
+    chmod +x /usr/local/bin/ipsw && \
+    rm /tmp/ipsw.tar.gz
 
 # Install Python dependencies
 COPY requirements-symbol-server.txt /tmp/
@@ -28,21 +29,16 @@ RUN mkdir -p /app/data/{cache,symbols,downloads,temp,processing,s3-ipsw}
 
 # Copy application files
 COPY custom_symbol_server.py /app/
-COPY ipsw-config.yml /app/
-COPY s3_optimized_manager.py /app/
-
-# Copy startup script
-COPY start-s3-optimized.sh /app/
-RUN chmod +x /app/start-s3-optimized.sh
+COPY internal_s3_manager.py /app/
+COPY symbol_server_manager.py /app/
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV IPSW_CONFIG_PATH=/app/ipsw-config.yml
 
-EXPOSE 8000
+EXPOSE 3993
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:3993/health || exit 1
 
-CMD ["/app/start-s3-optimized.sh"] 
+CMD ["python3", "custom_symbol_server.py"] 
