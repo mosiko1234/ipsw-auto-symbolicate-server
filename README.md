@@ -10,6 +10,7 @@ Enterprise-ready iOS crash symbolication system with **unified deployment** supp
 ✅ **Storage Management** - Auto-cleanup with 99% space savings  
 ✅ **Enterprise Ready** - PostgreSQL, Nginx, monitoring, and health checks  
 ✅ **Development Team Integration** - Web UI, API, and comprehensive documentation  
+✅ **Beautiful CLI Tool** - Professional terminal interface for developers  
 
 ## 🚀 Quick Start
 
@@ -141,17 +142,52 @@ For detailed deployment instructions, configuration options, and troubleshooting
 
 ## 🚀 Development Team Integration
 
+### 🎨 CLI Tool - Beautiful Terminal Interface
+
+**Quick Installation:**
+```bash
+curl -sSL https://github.com/mosiko1234/ipsw-auto-symbolicate-server/raw/main/install_cli.sh | bash
+```
+
+**Usage Examples:**
+```bash
+# Basic symbolication
+ipsw-cli crash.ips
+
+# Custom server
+ipsw-cli crash.ips --server http://your-server:8000
+
+# Full output with rich formatting
+ipsw-cli crash.ips --full
+
+# Save results to JSON
+ipsw-cli crash.ips --save results.json
+```
+
+**Features:**
+- 🎨 **Rich Terminal Output** - Beautiful tables, colors, and progress indicators
+- 📊 **Detailed Statistics** - Symbol counts, success rates, quality indicators
+- 🔍 **Syntax Highlighting** - Code output with line numbers
+- 📱 **Device Information** - Automatic device/iOS version detection
+- 💾 **Export Options** - Save results to JSON files
+- ⚡ **Cross-Platform** - Works on macOS, Linux, and Windows
+
+📖 **[→ CLI Documentation](CLI_USAGE.md) ←**
+
 ### For iOS Developers
 ```bash
-# Symbolicate crash file
+# Method 1: Beautiful CLI (Recommended)
+ipsw-cli crash.ips
+
+# Method 2: Direct API
 curl -X POST http://localhost:8000/v1/symbolicate \
   -F "crash_file=@crash.ips"
 ```
 
 ### For QA Teams
-1. Access Web UI: http://localhost:5001
-2. Upload crash files via drag-and-drop
-3. View symbolicated results instantly
+1. **Web UI**: http://localhost:5001 - Upload files via drag-and-drop
+2. **CLI Tool**: `ipsw-cli crash.ips` - Professional terminal interface
+3. View symbolicated results instantly with rich formatting
 
 ### For DevOps Teams
 ```bash
@@ -161,8 +197,8 @@ curl http://localhost:8000/v1/system-status
 # Check storage usage
 curl http://localhost:8000/v1/disk-usage
 
-# Trigger cleanup
-curl -X POST http://localhost:8000/v1/cleanup
+# Batch processing with CLI
+find crashes/ -name "*.ips" -exec ipsw-cli {} --quiet --save {}.json \;
 ```
 
 ## 📈 Performance Metrics
@@ -216,6 +252,10 @@ ipsw-auto-symbolicate-server/
 │   └── env.airgap              # Airgap environment
 ├── signatures/                 # blacktop/symbolicator signatures
 ├── data/                       # Runtime data (auto-created)
+├── ipsw_cli.py                 # Beautiful CLI tool for developers
+├── install_cli.sh              # CLI installation script
+├── requirements-cli.txt        # CLI dependencies
+├── CLI_USAGE.md                # CLI documentation
 ├── docker-compose.yml          # Unified deployment configuration
 ├── deploy-regular.sh           # Convenience script → scripts/
 ├── deploy-airgap.sh            # Convenience script → scripts/
