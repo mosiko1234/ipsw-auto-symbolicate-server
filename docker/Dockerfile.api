@@ -34,6 +34,7 @@ COPY api_with_ui.py .
 COPY internal_s3_manager.py .
 COPY device_mapping_manager.py .
 COPY templates/ templates/
+COPY static/ static/
 
 # Create necessary data directory and set permissions
 RUN mkdir -p /app/data/temp && chown -R appuser:appuser /app

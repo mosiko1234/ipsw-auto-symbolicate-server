@@ -4,7 +4,7 @@ Web UI for IPSW Symbol Server
 Allows developers to upload IPS crash files and get symbolicated results
 """
 
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file, make_response
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file, make_response, send_from_directory
 import requests
 import json
 import os
@@ -262,6 +262,11 @@ def download_results(analysis_id):
     except Exception as e:
         flash(f'Download error: {str(e)}', 'error')
         return redirect(url_for('index'))
+
+@app.route('/static/<path:filename>')
+def static_files(filename):
+    """Serve static files"""
+    return send_from_directory('static', filename)
 
 @app.route('/api/status')
 def api_status():

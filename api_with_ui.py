@@ -47,6 +47,9 @@ app.add_middleware(
 # Setup templates
 templates = Jinja2Templates(directory="templates")
 
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # Configuration
 SYMBOL_SERVER_URL = os.getenv("SYMBOL_SERVER_URL", "http://localhost:3993")
 DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
