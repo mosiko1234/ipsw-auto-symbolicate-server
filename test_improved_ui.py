@@ -48,11 +48,11 @@ def test_api_with_ui():
             print("✅ UI homepage accessible")
             # Check for key elements
             content = response.text
-            if "גרור קובץ IPS לכאן" in content:
+            if "Drag IPS file here" in content:
                 print("✅ Updated upload text found")
-            if "תהליך הניתוח" in content:
+            if "Analysis Process" in content:
                 print("✅ Process steps section found")
-            if "טיפים להצלחה" in content:
+            if "Success Tips" in content:
                 print("✅ Success tips section found")
         else:
             print(f"❌ UI homepage failed: {response.status_code}")
@@ -86,13 +86,13 @@ def test_api_with_ui():
                 
                 if response.status_code == 200:
                     content = response.text
-                    if "תוצאות Symbolication" in content:
+                    if "Symbolication Results" in content:
                         print("✅ File upload and processing successful")
-                        if "פרטי הקובץ והמכשיר" in content:
+                        if "File and Device Information" in content:
                             print("✅ File info section displayed")
-                        if "איכות Symbolication" in content:
+                        if "Symbolication Quality" in content:
                             print("✅ Symbolication quality section displayed")
-                        if "הורד JSON מלא" in content:
+                        if "Download Full JSON" in content:
                             print("✅ Download buttons available")
                     else:
                         print("⚠️  Upload succeeded but results page may have issues")

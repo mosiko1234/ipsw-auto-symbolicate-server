@@ -8,7 +8,16 @@ set -e
 echo "🔒 Starting IPSW Symbol Server - Airgap Deployment"
 
 # Copy airgap environment file
-cp config/env.airgap .env
+if [ ! -f .env ]; then
+    echo "📝 Copying airgap environment configuration..."
+    cp config/env.airgap .env
+    echo "⚠️  Please edit .env file to configure your airgap environment:"
+    echo "   - AIRGAP_REGISTRY: Your internal Docker registry"
+    echo "   - AIRGAP_S3_ENDPOINT: Your internal S3 endpoint"
+    echo "   - S3_ACCESS_KEY/S3_SECRET_KEY: Your S3 credentials"
+else
+    echo "📁 Using existing .env file"
+fi
 
 # Load environment variables
 source .env
@@ -19,113 +28,93 @@ mkdir -p data/{cache,symbols,downloads,temp,processing}
 mkdir -p postgres
 
 # Create PostgreSQL init script if not exists
-if [ ! -f postgres/init.sql ]; then
-    cat > postgres/init.sql << 'EOF'
--- IPSW Symbol Server Database Initialization
+if [ ! -f postgres/init-symbols-db.sql ]; then
+    echo "🗃️  PostgreSQL init script not found, creating default..."
+    cat > postgres/init-symbols-db.sql << 'EOF'
+-- Initialize Symbol Server database
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Symbols table
+-- Symbols table for storing symbol metadata
 CREATE TABLE IF NOT EXISTS symbols (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    device_model VARCHAR(50) NOT NULL,
+    device_identifier VARCHAR(50) NOT NULL,
     ios_version VARCHAR(20) NOT NULL,
-    build_number VARCHAR(20) NOT NULL,
-    symbol_address BIGINT NOT NULL,
-    symbol_name TEXT NOT NULL,
-    binary_name VARCHAR(100),
+    build_version VARCHAR(20) NOT NULL,
+    kernel_path TEXT NOT NULL,
+    symbols_path TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(device_model, ios_version, build_number, symbol_address)
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(device_identifier, ios_version, build_version)
 );
 
 -- Index for faster lookups
-CREATE INDEX IF NOT EXISTS idx_symbols_lookup 
-ON symbols(device_model, ios_version, build_number, symbol_address);
+CREATE INDEX IF NOT EXISTS idx_symbols_device_version 
+ON symbols(device_identifier, ios_version, build_version);
 
--- IPSW files tracking
-CREATE TABLE IF NOT EXISTS ipsw_files (
+-- Symbol cache table
+CREATE TABLE IF NOT EXISTS symbol_cache (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    filename VARCHAR(255) NOT NULL UNIQUE,
-    device_model VARCHAR(50) NOT NULL,
-    ios_version VARCHAR(20) NOT NULL,
-    build_number VARCHAR(20) NOT NULL,
-    file_size BIGINT,
-    download_url TEXT,
-    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    symbols_extracted INTEGER DEFAULT 0
+    cache_key VARCHAR(255) UNIQUE NOT NULL,
+    symbol_data JSONB NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_ipsw_device_version 
-ON ipsw_files(device_model, ios_version, build_number);
+-- Index for cache lookups
+CREATE INDEX IF NOT EXISTS idx_symbol_cache_key ON symbol_cache(cache_key);
+CREATE INDEX IF NOT EXISTS idx_symbol_cache_expires ON symbol_cache(expires_at);
 EOF
+else
+    echo "✅ PostgreSQL init script found"
 fi
 
 # Validate airgap configuration
 echo "🔍 Validating airgap configuration..."
-if [ -z "$AIRGAP_REGISTRY" ]; then
-    echo "❌ Error: AIRGAP_REGISTRY not set in env.airgap"
-    echo "Please configure your internal Docker registry"
-    exit 1
+if [ -z "$AIRGAP_REGISTRY" ] || [ "$AIRGAP_REGISTRY" = "your-registry.local:5000" ]; then
+    echo "⚠️  Warning: AIRGAP_REGISTRY not configured properly"
+    echo "Please update AIRGAP_REGISTRY in .env file"
 fi
 
-if [ -z "$AIRGAP_S3_ENDPOINT" ]; then
-    echo "❌ Error: AIRGAP_S3_ENDPOINT not set in env.airgap"
-    echo "Please configure your internal S3 endpoint"
-    exit 1
+if [ -z "$AIRGAP_S3_ENDPOINT" ] || [ "$AIRGAP_S3_ENDPOINT" = "http://s3.internal.local:9000" ]; then
+    echo "⚠️  Warning: AIRGAP_S3_ENDPOINT not configured properly"
+    echo "Please update AIRGAP_S3_ENDPOINT in .env file"
 fi
 
-echo "✅ Registry: $AIRGAP_REGISTRY"
-echo "✅ S3 Endpoint: $AIRGAP_S3_ENDPOINT"
+# Check if images are available
+echo "🐳 Checking Docker images..."
+REGISTRY=${AIRGAP_REGISTRY:-localhost:5000}
+VERSION=${VERSION:-latest}
 
-# Check if required images exist in registry
-echo "🔍 Checking pre-built images availability..."
-required_images=(
-    "ipsw-symbol-server:${VERSION}"
-    "ipsw-api-server:${VERSION}"
-    "ipsw-web-ui:${VERSION}"
-    "ipsw-nginx:${VERSION}"
-)
-
-for image in "${required_images[@]}"; do
-    full_image="${AIRGAP_REGISTRY}/${image}"
-    echo "  Checking: $full_image"
-    if ! docker pull "$full_image" >/dev/null 2>&1; then
-        echo "❌ Error: Image $full_image not found in registry"
-        echo "Please ensure all images are built and pushed to the registry first"
-        echo "Run: ./build-images-for-airgap.sh"
+for image in "ipsw-symbol-server" "ipsw-api-server" "ipsw-nginx"; do
+    if ! docker image inspect "${REGISTRY}/${image}:${VERSION}" >/dev/null 2>&1; then
+        echo "❌ Image ${REGISTRY}/${image}:${VERSION} not found"
+        echo "Please build images first: ./scripts/build-airgap-images.sh"
+        echo "Or load from file: docker load < ipsw-images.tar.gz"
         exit 1
+    else
+        echo "✅ Found ${REGISTRY}/${image}:${VERSION}"
     fi
-    echo "  ✅ Found: $full_image"
 done
 
-# Start services with airgap profile (no build)
-echo "🚀 Starting services with pre-built images..."
+# Create signatures directory structure
+echo "📂 Creating signatures directory..."
+mkdir -p signatures/symbolicator/kernel
+
+# Deploy using airgap profile
+echo "🚀 Deploying IPSW Symbol Server (Airgap Mode)..."
 docker-compose --profile airgap up -d
 
-echo "⏳ Waiting for services to be healthy..."
-timeout=300
-elapsed=0
-while [ $elapsed -lt $timeout ]; do
-    if docker-compose ps | grep -q "healthy"; then
-        echo "✅ Services are healthy!"
-        break
-    fi
-    sleep 10
-    elapsed=$((elapsed + 10))
-    echo "   Waiting... ($elapsed/${timeout}s)"
-done
-
-# Show service status
-echo "📊 Service Status:"
-docker-compose ps
-
-echo "🌐 Services are available at:"
-echo "  • Web UI: http://localhost:5001"
-echo "  • API: http://localhost:8000"
-echo "  • Symbol Server: http://localhost:3993"
-echo "  • Nginx (Main): http://localhost"
 echo ""
-echo "🔒 Airgap Configuration:"
-echo "  • Registry: $AIRGAP_REGISTRY"
-echo "  • S3: $AIRGAP_S3_ENDPOINT"
-
-echo "✅ Airgap deployment completed successfully!" 
+echo "✅ Airgap deployment completed!"
+echo ""
+echo "🌐 Services will be available at:"
+echo "   Web UI: http://localhost:${NGINX_PORT:-80}"
+echo "   API: http://localhost:${API_PORT:-8000}"
+echo "   Symbol Server: http://localhost:${SYMBOL_PORT:-3993}"
+echo "   PostgreSQL: localhost:5432"
+echo ""
+echo "📊 To check status:"
+echo "   docker-compose --profile airgap ps"
+echo ""
+echo "📋 To view logs:"
+echo "   docker-compose --profile airgap logs -f" 

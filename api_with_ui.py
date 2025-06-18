@@ -221,33 +221,33 @@ async def symbolicate_via_api(crash_content: str) -> SymbolicationResult:
     
     try:
         start_time = time.time()
-        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] התחלת עיבוד עבור ניתוח {analysis_id}")
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Starting analysis for {analysis_id}")
 
         # Parse IPS file to extract metadata
         file_info = parse_ips_file(crash_content)
-        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] סוג קובץ זוהה: {'JSON' if file_info['is_ips_format'] else 'Text'}")
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] File type detected: {'JSON' if file_info['is_ips_format'] else 'Text'}")
         
         # Extract device and version information from the parsed data
         device_model = file_info.get("device_model")
         ios_version = file_info.get("ios_version")
         build_version = file_info.get("build_version")
         
-        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] חולצו פרטים ראשוניים: דגם='{device_model}', גרסה='{ios_version}', בילד='{build_version}'")
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Extracted initial details: model='{device_model}', version='{ios_version}', build='{build_version}'")
 
         # Attempt to map the device identifier to a marketing name
         if device_model and device_mapper:
             original_identifier = device_model
             marketing_name = device_mapper.get_marketing_name(original_identifier)
             if marketing_name != original_identifier:
-                findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] תרגום מזהה מכשיר: '{original_identifier}' -> '{marketing_name}'")
+                findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Device identifier translation: '{original_identifier}' -> '{marketing_name}'")
                 device_model = marketing_name  # Use the marketing name for the search
                 file_info['device_model'] = marketing_name # Update file_info for display
         
         # Validate that we have the necessary info before calling the symbol server
         if not device_model or not ios_version:
-            error_message = "לא ניתן היה לחלץ את דגם המכשיר או גרסת iOS מקובץ הקריסה. לא ניתן להמשיך ב-Symbolication."
+            error_message = "Could not extract device model or iOS version from crash file. Cannot continue with symbolication."
             logger.error(error_message)
-            findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] שגיאה: {error_message}")
+            findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {error_message}")
             return SymbolicationResult(
                 success=False,
                 message=error_message,
@@ -259,7 +259,7 @@ async def symbolicate_via_api(crash_content: str) -> SymbolicationResult:
             )
 
         # Make request to symbol server
-        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] שולח בקשה לשרת הסמלים: {SYMBOL_SERVER_URL}")
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Sending request to symbol server: {SYMBOL_SERVER_URL}")
         async with httpx.AsyncClient(timeout=300.0) as client:
             response = await client.post(
                 f"{SYMBOL_SERVER_URL}/v1/symbolicate",
@@ -286,7 +286,7 @@ async def symbolicate_via_api(crash_content: str) -> SymbolicationResult:
                     if ios_version:
                         message += f" iOS {ios_version}"
                     
-                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] סימבולים מומשכים בהצלחה")
+                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Symbolication completed successfully")
                     return SymbolicationResult(
                         success=True,
                         message=message,
@@ -299,14 +299,14 @@ async def symbolicate_via_api(crash_content: str) -> SymbolicationResult:
                 else:
                     # Handle cases where server returns 200 but success=false
                     error_msg = api_result.get('message', 'Unknown error')
-                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] שרת הסמלים החזיר שגיאה: {error_msg}")
+                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Symbol server returned error: {error_msg}")
                     if 'No symbols found' in error_msg or 'symbols not available' in error_msg:
-                        error_msg = f"אין סימבולים זמינים עבור {device_model} iOS {ios_version}. "
+                        error_msg = f"No symbols found for {device_model} iOS {ios_version}. "
                         if build_version:
                             error_msg += f"Build {build_version}. "
-                        error_msg += "יש להוסיף קובץ IPSW מתאים למערכת או לבדוק שפרטי המכשיר נכונים."
+                        error_msg += "Please download the appropriate IPSW and ensure device details are correct."
                     
-                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] שגיאה: {error_msg}")
+                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {error_msg}")
                     return SymbolicationResult(
                         success=False,
                         message=error_msg,
@@ -317,8 +317,8 @@ async def symbolicate_via_api(crash_content: str) -> SymbolicationResult:
                         findings=findings
                     )
             else:
-                error_message = f"שגיאת שרת סימבולים: HTTP {response.status_code} - {response.text}"
-                findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] {error_message}")
+                error_message = f"Symbol server error: HTTP {response.status_code} - {response.text}"
+                findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {error_message}")
                 return SymbolicationResult(
                     success=False,
                     message=error_message,
@@ -331,7 +331,7 @@ async def symbolicate_via_api(crash_content: str) -> SymbolicationResult:
     except Exception as e:
         logger.error(f"Symbolication error: {e}", exc_info=True)
         error_message = f"Connection error: {str(e)}"
-        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] {error_message}")
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {error_message}")
         return SymbolicationResult(
             success=False,
             message=error_message,
@@ -352,13 +352,13 @@ async def web_ui_upload(request: Request, file: UploadFile = File(...)):
     if not file.filename:
         return templates.TemplateResponse("index.html", {
             "request": request,
-            "error": "לא נבחר קובץ"
+            "error": "No file selected"
         })
     
     if not allowed_file(file.filename):
         return templates.TemplateResponse("index.html", {
             "request": request,
-            "error": "סוג קובץ לא תקין"
+            "error": "Invalid file type"
         })
     
     try:
@@ -382,7 +382,7 @@ async def web_ui_upload(request: Request, file: UploadFile = File(...)):
         logger.error(f"Error processing file upload: {e}", exc_info=True)
         return templates.TemplateResponse("index.html", {
             "request": request,
-            "error": f"שגיאת עיבוד: {str(e)}"
+            "error": f"Processing error: {str(e)}"
         })
 
 @app.get("/ui/download/{analysis_id}")
@@ -445,7 +445,7 @@ async def auto_scan(request: AutoScanRequest):
             
             return AutoScanResult(
                 success=download_success,
-                message=f"נמצא קובץ IPSW מתאים: {file_info['key']}. {download_message}",
+                message=f"Found matching IPSW: {file_info['key']}. {download_message}",
                 found_files=[{
                     "filename": file_info['key'],
                     "device": file_info['device'],
@@ -465,7 +465,7 @@ async def auto_scan(request: AutoScanRequest):
             
             return AutoScanResult(
                 success=False,
-                message=f"לא נמצא קובץ IPSW עבור {request.device_model} iOS {request.ios_version}",
+                message=f"No matching IPSW found for {request.device_model} iOS {request.ios_version}",
                 found_files=[{
                     "filename": f['filename'],
                     "device": f['device'],

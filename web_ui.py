@@ -147,18 +147,16 @@ def upload_file():
     print(f"📁 Files keys: {list(request.files.keys())}")
     
     if 'file' not in request.files:
-        print("❌ No 'file' key in request.files")
-        flash('לא נבחר קובץ', 'error')
-        return redirect(url_for('index'))
+        flash('No file selected', 'error')
+        return redirect(request.url)
     
     file = request.files['file']
     print(f"📄 File object: {file}")
     print(f"📝 Filename: '{file.filename}'")
     
     if file.filename == '':
-        print("❌ Empty filename")
-        flash('לא נבחר קובץ', 'error')
-        return redirect(url_for('index'))
+        flash('No file selected', 'error')
+        return redirect(request.url)
     
     if file and allowed_file(file.filename):
         print(f"📁 Processing file: {file.filename}, size: {len(file.read())} bytes")
@@ -207,16 +205,16 @@ def upload_file():
                 flash(f'Symbolication API error: {response.status_code}', 'error')
                 
         except requests.exceptions.RequestException as e:
-            flash(f'שגיאת חיבור: {str(e)}', 'error')
+            flash(f'Connection error: {str(e)}', 'error')
         except Exception as e:
-            flash(f'שגיאת עיבוד: {str(e)}', 'error')
+            flash(f'Processing error: {str(e)}', 'error')
         finally:
             # Clean up uploaded file if it still exists
             if os.path.exists(filepath):
                 os.remove(filepath)
     
     else:
-        flash('סוג קובץ לא תקין. אנא העלה קבצים מסוג .ips, .crash, .txt, או .json', 'error')
+        flash('Invalid file type. Please upload .ips, .crash, .txt, or .json files', 'error')
     
     return redirect(url_for('index'))
 

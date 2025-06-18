@@ -276,14 +276,16 @@
                 </a>
                 <div class="navbar-nav ms-auto">
                     <a class="nav-link" href="/ui">
-                        <i class="fas fa-home"></i> בית
+                        <i class="fas fa-home"></i> Home
                     </a>
                     <a class="nav-link" href="/docs" target="_blank">
                         <i class="fas fa-book"></i> API Docs
                     </a>
-                    <span class="nav-link" id="status-indicator">
-                        <i class="fas fa-circle-notch fa-spin"></i> בודק סטטוס...
-                    </span>
+                    <div id="status-container" class="mt-3">
+                        <div id="server-status" class="status-indicator">
+                            <i class="fas fa-circle-notch fa-spin"></i> Checking status...
+                        </div>
+                    </div>
                 </div>
             </div>
         </nav>
@@ -301,7 +303,7 @@
                 <p class="mb-0">
                     <i class="fas fa-code"></i> 
                     IPSW Auto-Symbolication Server | 
-                    תמיכה ב-iPhone 15 Pro ו-iOS 18.5+ |
+                    iPhone 15 Pro & iOS 18.5+ Support |
                     <a href="https://github.com/mosiko1234/ipsw-auto-symbolicate-server" target="_blank" class="text-light">
                         <i class="fab fa-github"></i> GitHub
                     </a>
@@ -320,15 +322,15 @@
                 const response = await fetch('/health');
                 const data = await response.json();
                 
-                const statusElement = document.getElementById('status-indicator');
-                if (response.ok && data.status === 'healthy') {
-                    statusElement.innerHTML = '<i class="fas fa-check-circle text-success"></i> מערכת פעילה';
+                const statusElement = document.getElementById('server-status');
+                if (response.ok && data.status === 'online') {
+                    statusElement.innerHTML = '<i class="fas fa-check-circle text-success"></i> System Online';
                 } else {
-                    statusElement.innerHTML = '<i class="fas fa-exclamation-triangle text-warning"></i> מערכת בבעיה';
+                    statusElement.innerHTML = '<i class="fas fa-exclamation-triangle text-warning"></i> System Issues';
                 }
             } catch (error) {
-                const statusElement = document.getElementById('status-indicator');
-                statusElement.innerHTML = '<i class="fas fa-times-circle text-danger"></i> אין חיבור';
+                const statusElement = document.getElementById('server-status');
+                statusElement.innerHTML = '<i class="fas fa-times-circle text-danger"></i> No Connection';
             }
         }
 
