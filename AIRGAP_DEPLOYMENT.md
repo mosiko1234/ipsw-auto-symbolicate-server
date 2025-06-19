@@ -91,6 +91,8 @@ ipsw-airgap-package.tar.gz
 
 ## 🚀 Airgap Network Deployment
 
+> **IMPORTANT: In airgap/offline mode, all dependencies (AppleDB, symbolicator, CLI, IPSW, etc.) must be provided locally. Do not run any internet download commands.**
+
 ### Step 1: Extract and Load Images
 ```bash
 # On airgap system
@@ -148,8 +150,8 @@ S3_ENDPOINT=http://minio:9000
 ```bash
 # Edit .env file
 AIRGAP_S3_ENDPOINT=https://s3.internal.company.com
-S3_ACCESS_KEY=your_access_key
-S3_SECRET_KEY=your_secret_key
+S3_ACCESS_KEY=minioadmin
+S3_SECRET_KEY=minioadmin
 S3_BUCKET=ipsw-symbols
 S3_USE_SSL=true
 ```

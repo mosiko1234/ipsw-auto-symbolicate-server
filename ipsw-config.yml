@@ -1,5 +1,5 @@
 daemon:
-  sigs-dir: /app/data/signatures/symbolicator/kernel
+  sigs-dir: ./data/symbolicator/kernel
 
 # Logging configuration
 logging:
@@ -15,7 +15,7 @@ download:
   
 # Kernel symbolication settings
 kernel:
-  sigs-dir: /app/data/signatures/symbolicator/kernel
+  sigs-dir: ./data/symbolicator/kernel
   extract-kexts: true
   
 # Symbol server configuration

@@ -47,7 +47,7 @@ app.add_middleware(
 # Configuration for internal network
 IPSWD_URL = os.getenv("IPSWD_URL", "http://ipswd-symbol-server:3993")
 S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://your-internal-s3.company.local")
-S3_BUCKET = os.getenv("S3_BUCKET", "ipsw-files")
+S3_BUCKET = os.getenv("S3_BUCKET", "ipsw")
 S3_USE_SSL = os.getenv("S3_USE_SSL", "false").lower() == "true"
 DATA_DIR = Path("/data")
 DOWNLOADS_DIR = DATA_DIR / "downloads"
@@ -68,7 +68,7 @@ s3_manager = InternalS3Manager(
 
 # Initialize Symbol Server Manager
 IPSWD_URL = os.getenv("IPSWD_URL", "http://ipswd-symbol-server:3993")
-SYMBOL_DB_URL = os.getenv("SYMBOL_DB_URL", "postgresql://symbols_admin:symbols_pass@symbols-postgres:5432/symbols")
+SYMBOL_DB_URL = os.getenv("SYMBOL_DB_URL", "postgresql://symbols_user:symbols_password@postgres:5432/symbols")
 SIGNATURES_DIR = os.getenv("SIGNATURES_DIR", "/data/signatures")
 
 # Initialize Symbol Server Manager (with fallback)

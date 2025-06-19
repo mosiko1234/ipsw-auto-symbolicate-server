@@ -5,8 +5,10 @@ Enterprise-ready iOS crash symbolication system with **unified deployment** supp
 ## 🎯 Key Features
 
 ✅ **Unified Deployment** - Single Docker Compose file for all environments  
-✅ **Airgap Support** - Pre-built images for secure offline deployments  
-✅ **Auto-Symbolication** - Intelligent IPSW detection and symbol extraction  
+✅ **Complete Airgap Support** - Pre-built images with all dependencies for secure offline deployments  
+✅ **Auto-Symbolication** - Intelligent IPSW detection, download, and symbol extraction  
+✅ **Device Mapping** - Automatic translation between marketing names (iPhone 14 Pro) and identifiers (iPhone15,2)  
+✅ **AppleDB Integration** - Complete device database for offline device identification  
 ✅ **Storage Management** - Auto-cleanup with 99% space savings  
 ✅ **Enterprise Ready** - PostgreSQL, Nginx, monitoring, and health checks  
 ✅ **Development Team Integration** - Web UI, API, and comprehensive documentation  
@@ -22,22 +24,29 @@ cd ipsw-auto-symbolicate-server
 ```
 **Access**: http://localhost
 
-### Airgap Deployment (secure/offline environments)
-```bash
-# 1. Prepare images (in connected environment)
-./build-images-for-airgap.sh
+### Airgap/Offline Deployment (no internet required)
+> **IMPORTANT: In airgap/offline mode, all dependencies (AppleDB, symbolicator, CLI, IPSW, etc.) are pre-included. No internet access required during operation.**
 
-# 2. Transfer to airgap environment
-# 3. Deploy
-./deploy-airgap.sh  
+1. Extract the provided package (includes pre-built Docker images and offline data)
+2. Start services:
+```bash
+docker-compose --profile airgap up -d
 ```
+3. The system includes:
+   - Complete AppleDB database for device mapping
+   - IPSW CLI tool pre-installed
+   - All required dependencies bundled
+4. Upload IPSW files to MinIO and the system will automatically:
+   - Map device names (iPhone 14 Pro → iPhone15,2)
+   - Extract and cache symbols
+   - Enable full crash symbolication
 
 ## 📋 Deployment Options
 
 | Type | Use Case | Features | Command |
 |------|----------|----------|---------|
-| **Regular** | Development teams | Builds images, internal MinIO | `./deploy-regular.sh` |
-| **Airgap** | Secure environments | Pre-built images, external S3 | `./deploy-airgap.sh` |
+| **Regular** | Development teams | Builds images, internal MinIO, auto-downloads | `./deploy-regular.sh` |
+| **Airgap** | Secure environments | Pre-built images, offline device mapping, manual IPSW upload | `./deploy-airgap.sh` |
 
 ## 🏗️ System Architecture
 
@@ -54,6 +63,9 @@ cd ipsw-auto-symbolicate-server
                   │
               [S3 Storage]
      (Internal MinIO / External)
+                  │
+          [AppleDB Device Mapping]
+     (Offline device identification)
 ```
 
 ## 🛠️ System Components
@@ -65,19 +77,38 @@ cd ipsw-auto-symbolicate-server
 - **PostgreSQL** - Symbol database with 25,000+ cached symbols
 - **Nginx** - Reverse proxy with documentation and health monitoring
 
-### Storage & Performance
+### Intelligence & Mapping
+- **Device Mapper** - Translates marketing names to device identifiers using AppleDB
+- **AppleDB Integration** - Complete offline device database (iPhone, iPad, etc.)
 - **Auto-Detection** - Intelligent IPSW scanning and download from S3
+- **Auto-Scan** - Automatic symbol extraction when matching IPSW is found
+
+### Storage & Performance
 - **Auto-Cleanup** - Automatic deletion of IPSW files after symbol extraction
 - **Space Optimization** - 99% storage savings (18.8GB+ saved automatically)
-- **Multi-Device Support** - iPhone 15 Pro, iPhone 15 Pro Max, and more
+- **Multi-Device Support** - All iPhone, iPad, iPod, Apple Watch, and Apple TV models
+- **Smart Caching** - Intelligent symbol caching with device-specific keys
 
 ## 📊 Supported Devices & iOS Versions
 
-| Device | iOS Versions | Kernel Signatures |
-|--------|--------------|-------------------|
-| iPhone 15 Pro (iPhone15,2) | 18.2-19.0 | ✅ 21,208 symbols |
-| iPhone 15 Pro Max (iPhone15,4) | 18.2-19.0 | ✅ 25,619 symbols |
-| iPhone 17,3 | 18.5+ | ✅ 25,000+ symbols |
+The system includes complete AppleDB integration supporting **all Apple devices**:
+
+| Device Category | Examples | Support Level |
+|----------------|----------|---------------|
+| **iPhone** | iPhone 14 Pro → iPhone15,2 | ✅ Full mapping & symbolication |
+| **iPad** | iPad Pro → iPad14,3 | ✅ Full mapping & symbolication |
+| **Apple Watch** | Apple Watch Series 9 → Watch6,18 | ✅ Device mapping available |
+| **Apple TV** | Apple TV 4K → AppleTV11,1 | ✅ Device mapping available |
+| **iPod** | iPod touch → iPod9,1 | ✅ Device mapping available |
+
+### Example Symbolication Results
+```
+Device: iPhone 14 Pro (mapped from iPhone15,2)
+iOS Version: iPhone OS 18.5 (22F76)
+Symbols Found: 21,206 kernel symbols
+Success Rate: 100%
+Processing Time: ~30 seconds
+```
 
 ## 🔧 Management & Monitoring
 
@@ -86,6 +117,7 @@ cd ipsw-auto-symbolicate-server
 - **API Status**: `GET /v1/system-status`
 - **Storage Usage**: `GET /v1/disk-usage`
 - **Auto-Scan**: `POST /v1/auto-scan`
+- **Available IPSWs**: `GET /v1/ipsws`
 
 ### Service URLs
 - **Main Portal**: http://localhost (Nginx)
@@ -93,6 +125,15 @@ cd ipsw-auto-symbolicate-server
 - **API Documentation**: http://localhost:8000/docs
 - **Symbol Server**: http://localhost:3993
 - **MinIO Console**: http://localhost:9001 (regular deployment)
+
+### Device Mapping Example
+```bash
+# CLI automatically maps device names
+ipsw-cli crash.ips
+# Input: "iPhone 14 Pro" → Auto-mapped to "iPhone15,2"
+# System finds: iPhone15,2_18.5_22F76_Restore.ipsw
+# Result: Full symbolication with 21,206 symbols
+```
 
 ## 📖 Complete Documentation
 
@@ -109,16 +150,24 @@ For detailed deployment instructions, configuration options, and troubleshooting
 
 ## 🔒 Airgap Deployment Highlights
 
+### Complete Offline Support
+- **No Internet Required** - All dependencies pre-included in Docker images
+- **AppleDB Included** - Complete device mapping database (2000+ devices)
+- **IPSW CLI Bundled** - No external downloads required
+- **Internal S3 Support** - Self-contained MinIO with auto-bucket creation
+- **Device Intelligence** - Full device name mapping without external API calls
+
 ### Security Features
-- **No Internet Required** - All dependencies in pre-built images
-- **Internal S3 Support** - Configurable internal storage endpoints
-- **Offline Transfer** - Image archives for secure environment transfer
-- **Network Isolation** - All services communicate internally
+- **Network Isolation** - All services communicate internally only
+- **Pre-built Images** - No external dependencies during runtime
+- **Offline Transfer** - Complete package for secure environment deployment
+- **Zero External Calls** - No git clone, curl, or wget operations during use
 
 ### Deployment Process
-1. **Build Phase** (connected environment): `./build-images-for-airgap.sh`
-2. **Transfer Phase**: Copy images to airgap environment
-3. **Deploy Phase** (airgap): `./deploy-airgap.sh`
+1. **Build Phase** (connected environment): Download all dependencies once
+2. **Package Phase**: Create complete airgap package with images and data
+3. **Transfer Phase**: Move package to secure environment
+4. **Deploy Phase** (airgap): `docker-compose --profile airgap up -d`
 
 ## 🛡️ Enterprise Features
 
@@ -129,13 +178,14 @@ For detailed deployment instructions, configuration options, and troubleshooting
 - Comprehensive logging and monitoring
 
 ### Integration Ready
-- **REST API** - Full automation support
+- **REST API** - Full automation support with device mapping
 - **Docker Compose** - Container orchestration
 - **Environment Variables** - Flexible configuration
 - **Volume Mounting** - Persistent data storage
 
 ### Performance Optimization
-- **Intelligent Caching** - Multi-level symbol caching
+- **Intelligent Caching** - Multi-level symbol caching with device-specific keys
+- **Device Mapping Cache** - Fast offline device name resolution
 - **Concurrent Processing** - Configurable parallel downloads
 - **Resource Management** - Memory and disk usage optimization
 - **Auto-Cleanup** - Automatic space management
@@ -144,15 +194,19 @@ For detailed deployment instructions, configuration options, and troubleshooting
 
 ### 🎨 CLI Tool - Beautiful Terminal Interface
 
-**Quick Installation:**
-```bash
-curl -sSL https://github.com/mosiko1234/ipsw-auto-symbolicate-server/raw/main/install_cli.sh | bash
-```
+**Features:**
+- 🎨 **Rich Terminal Output** - Beautiful tables, colors, and progress indicators
+- 📊 **Detailed Statistics** - Symbol counts, success rates, quality indicators
+- 🔍 **Syntax Highlighting** - Code output with line numbers
+- 📱 **Smart Device Detection** - Automatic device mapping (iPhone 14 Pro → iPhone15,2)
+- 💾 **Export Options** - Save results to JSON files
+- ⚡ **Cross-Platform** - Works on macOS, Linux, and Windows
 
 **Usage Examples:**
 ```bash
-# Basic symbolication
+# Basic symbolication with auto device mapping
 ipsw-cli crash.ips
+# → Automatically maps device names and finds matching IPSW
 
 # Custom server
 ipsw-cli crash.ips --server http://your-server:8000
@@ -164,20 +218,15 @@ ipsw-cli crash.ips --full
 ipsw-cli crash.ips --save results.json
 ```
 
-**Features:**
-- 🎨 **Rich Terminal Output** - Beautiful tables, colors, and progress indicators
-- 📊 **Detailed Statistics** - Symbol counts, success rates, quality indicators
-- 🔍 **Syntax Highlighting** - Code output with line numbers
-- 📱 **Device Information** - Automatic device/iOS version detection
-- 💾 **Export Options** - Save results to JSON files
-- ⚡ **Cross-Platform** - Works on macOS, Linux, and Windows
-
 📖 **[→ CLI Documentation](CLI_USAGE.md) ←**
 
 ### For iOS Developers
 ```bash
 # Method 1: Beautiful CLI (Recommended)
 ipsw-cli crash.ips
+# → Auto-detects "iPhone 14 Pro", maps to "iPhone15,2"
+# → Finds matching IPSW, extracts 21,206 symbols
+# → Returns fully symbolicated crash report
 
 # Method 2: Direct API
 curl -X POST http://localhost:8000/v1/symbolicate \
@@ -186,84 +235,41 @@ curl -X POST http://localhost:8000/v1/symbolicate \
 
 ### For QA Teams
 1. **Web UI**: http://localhost:5001 - Upload files via drag-and-drop
-2. **CLI Tool**: `ipsw-cli crash.ips` - Professional terminal interface
-3. View symbolicated results instantly with rich formatting
+2. **CLI Tool**: `ipsw-cli crash.ips` - Professional terminal interface with device mapping
+3. View symbolicated results instantly with device information
 
 ### For DevOps Teams
 ```bash
 # Monitor system health
 curl http://localhost:8000/v1/system-status
 
-# Check storage usage
-curl http://localhost:8000/v1/disk-usage
+# Check available IPSWs and device mapping
+curl http://localhost:3993/v1/ipsws
 
-# Batch processing with CLI
-find crashes/ -name "*.ips" -exec ipsw-cli {} --quiet --save {}.json \;
+# Trigger auto-scan for specific device
+curl -X POST "http://localhost:3993/v1/auto-scan?device_model=iPhone%2014%20Pro&ios_version=18.5"
 ```
 
-## 📈 Performance Metrics
+## 🔄 Recent Updates (v1.2.0)
 
-- **Symbol Cache**: 25,000+ symbols across multiple iOS versions
-- **Storage Savings**: 99% reduction (18.8GB+ saved automatically)
-- **Processing Speed**: Optimized with tmpfs and concurrent downloads
-- **Multi-Device**: Support for latest iPhone models and iOS versions
+### ✨ New Features
+- **Complete Device Mapping** - AppleDB integration for all Apple devices
+- **Enhanced Airgap Support** - Zero internet dependencies during operation
+- **Smart Auto-Scan** - Automatic device name mapping and IPSW detection
+- **Improved CLI** - Better device detection and mapping feedback
 
-## 🔄 Updates & Maintenance
+### 🔧 Technical Improvements
+- Fixed S3 endpoint configuration for containerized environments
+- Enhanced device filtering logic in S3 IPSW discovery
+- Bundled AppleDB database in Docker images
+- Improved error handling and logging
 
-### Regular Environment
-```bash
-git pull origin main
-./deploy-regular.sh
-```
-
-### Airgap Environment
-```bash
-# 1. Update in connected environment
-./build-images-for-airgap.sh
-
-# 2. Transfer and deploy in airgap
-docker load -i ipsw-images-latest.tar
-./deploy-airgap.sh
-```
-
-## 📞 Support & Contributing
-
-- **Issues**: Open GitHub issues for bugs and feature requests
-- **Documentation**: See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for comprehensive setup
-- **Security**: For security-related issues, please use private channels
-
-## 📁 Project Structure
-
-```
-ipsw-auto-symbolicate-server/
-├── docker/                     # Docker image definitions
-│   ├── Dockerfile.api          # API server image
-│   ├── Dockerfile.symbol-server # Symbol server image  
-│   ├── Dockerfile.webui        # Web UI image
-│   └── Dockerfile.nginx        # Nginx proxy image
-├── scripts/                    # Deployment and management scripts
-│   ├── deploy-regular.sh       # Regular deployment
-│   ├── deploy-airgap.sh        # Airgap deployment
-│   ├── build-images-for-airgap.sh # Image preparation
-│   ├── start-server.sh         # Start services
-│   └── stop-server.sh          # Stop services
-├── config/                     # Environment configurations
-│   ├── env.regular             # Regular environment
-│   └── env.airgap              # Airgap environment
-├── signatures/                 # blacktop/symbolicator signatures
-├── data/                       # Runtime data (auto-created)
-├── ipsw_cli.py                 # Beautiful CLI tool for developers
-├── install_cli.sh              # CLI installation script
-├── requirements-cli.txt        # CLI dependencies
-├── CLI_USAGE.md                # CLI documentation
-├── docker-compose.yml          # Unified deployment configuration
-├── deploy-regular.sh           # Convenience script → scripts/
-├── deploy-airgap.sh            # Convenience script → scripts/
-└── DEPLOYMENT_GUIDE.md         # Detailed deployment instructions
-```
+### 📦 Deployment Enhancements
+- Simplified airgap deployment process
+- Pre-built Docker images with all dependencies
+- Automatic MinIO bucket creation
+- Consistent configuration across all services
 
 ---
 
-**🎯 Enterprise-ready iOS crash symbolication with unified deployment for all environments** 
-
-Built with ❤️ for development teams requiring both flexibility and security. 
+**Ready for enterprise deployment with complete offline support!** 🚀 

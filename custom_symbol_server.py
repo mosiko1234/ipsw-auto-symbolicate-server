@@ -595,8 +595,25 @@ async def auto_ensure_symbols_available(device_model: str, ios_version: str, bui
         
         # Search for matching IPSW in S3
         try:
-            logger.info(f"Searching for IPSW files in S3 for {device_model} {ios_version}")
-            available_ipsws = await s3_manager.list_available_ipsw(device_filter=device_model)
+            # If device_model is a marketing name (e.g., "iPhone 14 Pro"), convert to identifier
+            actual_device_model = device_model
+            # Check if this looks like a marketing name (contains spaces or isn't in identifier format)
+            if (' ' in device_model or ',' not in device_model):
+                # This looks like a marketing name, try to convert it
+                try:
+                    from device_mapping_manager import DeviceMappingManager
+                    device_mapper = DeviceMappingManager()
+                    mapped_identifier = device_mapper.get_device_identifier(device_model)
+                    if mapped_identifier:
+                        actual_device_model = mapped_identifier
+                        logger.info(f"Mapped marketing name '{device_model}' to identifier '{actual_device_model}'")
+                    else:
+                        logger.warning(f"Could not map marketing name '{device_model}' to device identifier")
+                except Exception as e:
+                    logger.warning(f"Failed to load device mapping: {e}")
+            
+            logger.info(f"Searching for IPSW files in S3 for {actual_device_model} {ios_version}")
+            available_ipsws = await s3_manager.list_available_ipsw(device_filter=actual_device_model)
             logger.info(f"Found {len(available_ipsws)} IPSW files in S3")
             
             # Normalize iOS version (extract version number from strings like "iPhone OS 18.5 (22F76)")
@@ -610,7 +627,7 @@ async def auto_ensure_symbols_available(device_model: str, ios_version: str, bui
             matching_ipsw = None
             for ipsw in available_ipsws:
                 logger.info(f"Checking IPSW: {ipsw}")
-                if (ipsw.get('device') == device_model and 
+                if (ipsw.get('device') == actual_device_model and 
                     ipsw.get('version') == normalized_ios_version):
                     if build_number and ipsw.get('build') == build_number:
                         matching_ipsw = ipsw
@@ -622,20 +639,20 @@ async def auto_ensure_symbols_available(device_model: str, ios_version: str, bui
             if not matching_ipsw and build_number:
                 # Try without exact build match
                 for ipsw in available_ipsws:
-                    if (ipsw.get('device') == device_model and 
+                    if (ipsw.get('device') == actual_device_model and 
                         ipsw.get('version') == normalized_ios_version):
                         matching_ipsw = ipsw
                         break
             
             if not matching_ipsw:
                 available_list = [f"{f.get('device')}_{f.get('version')}" for f in available_ipsws]
-                return False, f"No matching IPSW found in S3 for {device_model} {ios_version}. Available: {available_list}"
+                return False, f"No matching IPSW found in S3 for {actual_device_model} {ios_version} (original: {device_model}). Available: {available_list}"
             
             logger.info(f"Found matching IPSW: {matching_ipsw.get('filename')}")
             
             # Download IPSW
             download_success, download_msg, ipsw_path = await s3_manager.download_ipsw(
-                device_model=device_model,
+                device_model=actual_device_model,
                 os_version=normalized_ios_version,
                 build_number=build_number or matching_ipsw.get('build')
             )

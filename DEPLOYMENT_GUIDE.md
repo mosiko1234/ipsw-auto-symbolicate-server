@@ -66,53 +66,113 @@ MAX_CONCURRENT_DOWNLOADS=3
 
 ## 🔒 Airgap Deployment
 
-### Prerequisites
-- Docker (no internet access required after setup)
-- Pre-built Docker images from regular environment
-- External S3 storage
+> **IMPORTANT: In airgap/offline mode, all dependencies (AppleDB, symbolicator, CLI, IPSW, etc.) are pre-included in Docker images. No internet access required during operation.**
 
-### Step 1: Prepare Images (in regular environment)
+### Complete Offline Features
+- **AppleDB Integration**: Complete device mapping database (2000+ devices) bundled in images
+- **Device Intelligence**: Automatic translation (iPhone 14 Pro → iPhone15,2) without external API calls
+- **IPSW CLI Bundled**: Pre-installed ipsw binary for symbol extraction
+- **Zero External Dependencies**: No git clone, curl, wget, or API calls during runtime
+- **Smart Auto-Scan**: Automatic IPSW detection and symbol extraction based on device mapping
+
+### Airgap Deployment Steps
+
+1. **Prepare Environment** (one-time setup in connected environment):
 ```bash
-# 1. Configure airgap settings
-cp config/env.airgap .env
-# Edit registry and S3 settings
+# Clone repository and build images with all dependencies
+git clone https://github.com/mosiko1234/ipsw-auto-symbolicate-server.git
+cd ipsw-auto-symbolicate-server
 
-# 2. Build and push images
-./build-images-for-airgap.sh
+# Download all required dependencies (AppleDB, symbolicator, IPSW CLI)
+./scripts/prepare-airgap.sh
+
+# Build images with bundled dependencies
+docker-compose --profile airgap build
 ```
 
-### Step 2: Transfer to Airgap Environment
+2. **Create Airgap Package**:
 ```bash
-# Option A: Registry transfer (if registry accessible)
-# Images are already pushed to AIRGAP_REGISTRY
+# Export Docker images for transfer
+docker save -o ipsw-symbol-server-v1.2.0.tar \
+  $(docker-compose --profile airgap config | grep 'image:' | awk '{print $2}')
 
-# Option B: Offline transfer
-# 1. Copy ipsw-images-{version}.tar to airgap environment
-# 2. Load images: docker load -i ipsw-images-{version}.tar
+# Package everything for transfer
+tar -czf ipsw-airgap-v1.2.0.tar.gz \
+  ipsw-symbol-server-v1.2.0.tar \
+  docker-compose.yml \
+  data/ \
+  README.md \
+  DEPLOYMENT_GUIDE.md
 ```
 
-### Step 3: Deploy in Airgap
+3. **Deploy in Airgap Environment**:
 ```bash
-# 1. Configure airgap environment
-cp config/env.airgap .env
-# Update S3 and registry settings
+# Transfer and extract package
+tar -xzf ipsw-airgap-v1.2.0.tar.gz
+cd ipsw-auto-symbolicate-server
 
-# 2. Deploy
-./deploy-airgap.sh
+# Load Docker images
+docker load -i ipsw-symbol-server-v1.2.0.tar
+
+# Start airgap deployment
+docker-compose --profile airgap up -d
 ```
 
-### Configuration (env.airgap)
+4. **Verify Deployment**:
 ```bash
-# Airgap Registry
-AIRGAP_REGISTRY=your-registry.local:5000
-VERSION=latest
+# Check all services are running
+docker-compose --profile airgap ps
 
-# External S3 Configuration
-AIRGAP_S3_ENDPOINT=http://s3.internal.local:9000
-S3_ACCESS_KEY=your_access_key
-S3_SECRET_KEY=your_secret_key
-S3_BUCKET=ipsw
+# Test device mapping capability
+curl "http://localhost:3993/v1/ipsws"
+
+# Test system health
+curl "http://localhost:8000/health"
 ```
+
+### Device Mapping in Airgap Mode
+
+The system includes complete AppleDB database with support for:
+- **All iPhone models**: iPhone 3G through iPhone 15 series
+- **All iPad models**: Original iPad through iPad Pro M2
+- **Apple Watch**: All generations and sizes
+- **Apple TV**: All generations including 4K models
+- **iPod**: All iPod touch generations
+
+Example device mappings included:
+```
+iPhone 14 Pro → iPhone15,2
+iPhone 14 Pro Max → iPhone15,3
+iPad Pro 12.9-inch (6th generation) → iPad14,5
+Apple Watch Series 9 → Watch6,18
+Apple TV 4K (3rd generation) → AppleTV11,1
+```
+
+### Upload IPSW Files
+
+1. **Access MinIO Console**: http://localhost:9001
+   - Username: `minioadmin`
+   - Password: `minioadmin`
+
+2. **Create/Access ipsw bucket** (auto-created on startup)
+
+3. **Upload IPSW files** with proper naming:
+```
+iPhone15,2_18.5_22F76_Restore.ipsw
+iPad14,3_18.5_22F76_Restore.ipsw
+```
+
+4. **Test Auto-Scan**:
+```bash
+# System will automatically map device names and find matching IPSW
+curl -X POST "http://localhost:3993/v1/auto-scan?device_model=iPhone%2014%20Pro&ios_version=18.5&build_number=22F76"
+```
+
+### Expected Results
+- **Device Mapping**: "iPhone 14 Pro" automatically mapped to "iPhone15,2"
+- **IPSW Detection**: System finds `iPhone15,2_18.5_22F76_Restore.ipsw`
+- **Symbol Extraction**: ~21,000+ kernel symbols extracted and cached
+- **Crash Symbolication**: Full symbolication capability enabled
 
 ## 🏗️ Architecture
 

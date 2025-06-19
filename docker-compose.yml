@@ -1,13 +1,13 @@
-version: '3.8'
+# IPSW Symbol Server with Kernel Symbolication Support
 
 services:
   postgres:
     image: postgres:15
     container_name: ipsw-postgres
     environment:
-      - POSTGRES_DB=${POSTGRES_DB:-symbols}
-      - POSTGRES_USER=${POSTGRES_USER:-symbols_user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-symbols_password}
+      - POSTGRES_DB=symbols
+      - POSTGRES_USER=symbols_user
+      - POSTGRES_PASSWORD=symbols_password
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init-symbols-db.sql:/docker-entrypoint-initdb.d/init.sql
@@ -15,13 +15,12 @@ services:
       - "5432:5432"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U symbols_user -d symbols"]
       interval: 30s
       timeout: 10s
       retries: 3
     profiles:
       - regular
-      - full
       - airgap
 
   # MinIO S3 Storage (only for regular deployment)
@@ -29,14 +28,17 @@ services:
     image: minio/minio:latest
     container_name: ipsw-minio
     environment:
-      - MINIO_ROOT_USER=${S3_ACCESS_KEY:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:-minioadmin}
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_BUCKETS=ipsw
     volumes:
       - minio_data:/data
+      - ./minio-init.sh:/minio-init.sh:ro
     ports:
       - "9000:9000"
       - "9001:9001"
-    command: server /data --console-address ":9001"
+    entrypoint: >
+      sh -c "/usr/bin/docker-entrypoint.sh server /data --console-address ':9001' & sleep 5 && /bin/sh /minio-init.sh && wait"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -45,7 +47,6 @@ services:
       retries: 3
     profiles:
       - regular
-      - full
       - airgap
 
   # Symbol Server - Regular deployment (with build)
@@ -57,22 +58,24 @@ services:
     ports:
       - "${SYMBOL_PORT:-3993}:3993"
     environment:
-      - S3_ENDPOINT=${S3_ENDPOINT:-http://minio:9000}
-      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
-      - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
-      - S3_BUCKET=${S3_BUCKET:-ipsw}
-      - S3_USE_SSL=${S3_USE_SSL:-false}
-      - S3_VERIFY_SSL=${S3_VERIFY_SSL:-false}
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+      - S3_BUCKET=ipsw
+      - S3_USE_SSL=false
+      - S3_VERIFY_SSL=false
       - CACHE_SIZE_GB=${CACHE_SIZE_GB:-100}
       - CLEANUP_AFTER_HOURS=${CLEANUP_AFTER_HOURS:-24}
       - MAX_CONCURRENT_DOWNLOADS=${MAX_CONCURRENT_DOWNLOADS:-3}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-symbols_user}:${POSTGRES_PASSWORD:-symbols_password}@postgres:5432/${POSTGRES_DB:-symbols}
+      - KERNEL_SIGS_DIR=/app/data/symbolicator/kernel
     volumes:
       - ./data/cache:/app/data/cache
       - ./data/symbols:/app/data/symbols
       - ./data/downloads:/app/data/downloads
       - ./data/temp:/app/data/temp
       - ./signatures:/app/data/signatures:ro
+      - ./data/symbolicator:/app/data/symbolicator:ro
     tmpfs:
       - /app/data/processing:size=2G,noexec,nosuid,nodev
     restart: unless-stopped
@@ -86,7 +89,7 @@ services:
       retries: 3
     profiles:
       - regular
-      - full
+      - airgap
 
   # Symbol Server - Airgap deployment (pre-built image)
   symbol-server-airgap:
@@ -95,22 +98,24 @@ services:
     ports:
       - "${SYMBOL_PORT:-3993}:3993"
     environment:
-      - S3_ENDPOINT=${AIRGAP_S3_ENDPOINT:-${S3_ENDPOINT}}
-      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
-      - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
-      - S3_BUCKET=${S3_BUCKET:-ipsw}
-      - S3_USE_SSL=${S3_USE_SSL:-false}
-      - S3_VERIFY_SSL=${S3_VERIFY_SSL:-false}
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+      - S3_BUCKET=ipsw
+      - S3_USE_SSL=false
+      - S3_VERIFY_SSL=false
       - CACHE_SIZE_GB=${CACHE_SIZE_GB:-100}
       - CLEANUP_AFTER_HOURS=${CLEANUP_AFTER_HOURS:-24}
       - MAX_CONCURRENT_DOWNLOADS=${MAX_CONCURRENT_DOWNLOADS:-3}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-symbols_user}:${POSTGRES_PASSWORD:-symbols_password}@postgres:5432/${POSTGRES_DB:-symbols}
+      - KERNEL_SIGS_DIR=/app/data/symbolicator/kernel
     volumes:
       - ./data/cache:/app/data/cache
       - ./data/symbols:/app/data/symbols
       - ./data/downloads:/app/data/downloads
       - ./data/temp:/app/data/temp
       - ./signatures:/app/data/signatures:ro
+      - ./data/symbolicator:/app/data/symbolicator:ro
     tmpfs:
       - /app/data/processing:size=2G,noexec,nosuid,nodev
     restart: unless-stopped
@@ -135,12 +140,12 @@ services:
       - "${API_PORT:-8000}:8000"
     environment:
       - SYMBOL_SERVER_URL=http://symbol-server:3993
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-symbols_user}:${POSTGRES_PASSWORD:-symbols_password}@postgres:5432/${POSTGRES_DB:-symbols}
-      - S3_ENDPOINT=${S3_ENDPOINT:-http://minio:9000}
-      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
-      - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
-      - S3_BUCKET=${S3_BUCKET:-ipsw}
-      - S3_USE_SSL=${S3_USE_SSL:-false}
+      - DATABASE_URL=postgresql://symbols_user:symbols_password@postgres:5432/symbols
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+      - S3_BUCKET=ipsw
+      - S3_USE_SSL=false
       - CACHE_SIZE_GB=${CACHE_SIZE_GB:-100}
     volumes:
       - ./data:/app/data
@@ -158,7 +163,7 @@ services:
       retries: 3
     profiles:
       - regular
-      - full
+      - airgap
 
   # API Server - Airgap deployment (pre-built image)
   api-server-airgap:
@@ -168,12 +173,12 @@ services:
       - "${API_PORT:-8000}:8000"
     environment:
       - SYMBOL_SERVER_URL=http://symbol-server-airgap:3993
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-symbols_user}:${POSTGRES_PASSWORD:-symbols_password}@postgres:5432/${POSTGRES_DB:-symbols}
-      - S3_ENDPOINT=${AIRGAP_S3_ENDPOINT:-${S3_ENDPOINT}}
-      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
-      - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
-      - S3_BUCKET=${S3_BUCKET:-ipsw}
-      - S3_USE_SSL=${S3_USE_SSL:-false}
+      - DATABASE_URL=postgresql://symbols_user:symbols_password@postgres:5432/symbols
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+      - S3_BUCKET=ipsw
+      - S3_USE_SSL=false
       - CACHE_SIZE_GB=${CACHE_SIZE_GB:-100}
     volumes:
       - ./data:/app/data
@@ -191,8 +196,6 @@ services:
       retries: 3
     profiles:
       - airgap
-
-
 
   # Nginx - Regular deployment (with build)
   nginx:
@@ -219,7 +222,7 @@ services:
       - "host.docker.internal:host-gateway"
     profiles:
       - regular
-      - full
+      - airgap
 
   # Nginx - Airgap deployment (pre-built image)
   nginx-airgap:
@@ -249,4 +252,4 @@ volumes:
   postgres_data:
     driver: local
   minio_data:
-    driver: local
+    driver: local 

@@ -26,7 +26,7 @@ class SymbolServerManager:
     def __init__(
         self,
         ipswd_url: str = "http://ipswd-symbol-server:3993",
-        database_url: str = "postgresql://symbols_admin:password@symbols-postgres:5432/symbols",
+        database_url: str = "postgresql://symbols_user:symbols_password@postgres:5432/symbols",
         s3_manager: Optional[InternalS3Manager] = None,
         signatures_dir: Optional[Path] = None
     ):
@@ -318,57 +318,13 @@ class SymbolServerManager:
             return {"error": error_msg}
     
     async def download_signatures(self, ios_version: str = "latest") -> bool:
-        """
-        Download symbolicator signatures for kernel symbolication
-        
-        Args:
-            ios_version: iOS version (e.g., "18", "17", "latest")
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            # Try to get signatures from internal S3 first
-            if self.s3_manager:
-                # Check if signatures exist in S3
-                signatures_available = await self.s3_manager.list_available_ipsw()
-                # Look for signature files (this would need to be implemented in S3 manager)
-            
-            # If not in S3, clone from GitHub (if internet access available)
-            signatures_repo_dir = self.signatures_dir / "symbolicator"
-            
-            if not signatures_repo_dir.exists():
-                logger.info("Cloning symbolicator signatures repository...")
-                import subprocess
-                result = subprocess.run([
-                    "git", "clone", 
-                    "https://github.com/blacktop/symbolicator.git",
-                    str(signatures_repo_dir)
-                ], capture_output=True, text=True)
-                
-                if result.returncode == 0:
-                    logger.info("Successfully cloned signatures repository")
-                    return True
-                else:
-                    logger.error(f"Failed to clone signatures: {result.stderr}")
-                    return False
-            else:
-                logger.info("Updating existing signatures repository...")
-                import subprocess
-                result = subprocess.run([
-                    "git", "pull"
-                ], cwd=signatures_repo_dir, capture_output=True, text=True)
-                
-                if result.returncode == 0:
-                    logger.info("Successfully updated signatures repository")
-                    return True
-                else:
-                    logger.warning(f"Failed to update signatures: {result.stderr}")
-                    return True  # Return True even if update fails, existing sigs might work
-            
-        except Exception as e:
-            logger.error(f"Error downloading signatures: {e}")
+        # AIRGAP: Only use local symbolicator signatures. Never clone or update from internet.
+        signatures_repo_dir = self.signatures_dir / "symbolicator"
+        if not signatures_repo_dir.exists():
+            logger.error("[AIRGAP] Symbolicator signatures not found locally. Airgap mode requires local copy.")
             return False
+        logger.info("[AIRGAP] Using local symbolicator signatures only.")
+        return True
     
     async def get_signature_path(self, ios_version: str) -> Optional[str]:
         """Get path to signatures for specific iOS version"""

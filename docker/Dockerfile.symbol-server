@@ -14,10 +14,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install IPSW tool directly - download the binary
-RUN wget -O /tmp/ipsw.tar.gz https://github.com/blacktop/ipsw/releases/download/v3.1.613/ipsw_3.1.613_linux_x86_64.tar.gz && \
-    tar -xzf /tmp/ipsw.tar.gz -C /usr/local/bin/ && \
-    chmod +x /usr/local/bin/ipsw && \
-    rm /tmp/ipsw.tar.gz
+# AIRGAP: Remove wget/curl. Copy ipsw binary from local data directory.
+COPY ./data/ipsw /usr/local/bin/ipsw
+RUN chmod +x /usr/local/bin/ipsw
 
 # Install Python dependencies
 COPY requirements-symbol-server.txt /tmp/
@@ -32,6 +31,9 @@ COPY custom_symbol_server.py /app/
 COPY internal_s3_manager.py /app/
 COPY symbol_server_manager.py /app/
 COPY device_mapping_manager.py /app/
+
+# Copy AppleDB data for device mapping (airgap mode)
+COPY ./data/appledb /app/data/appledb
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1

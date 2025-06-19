@@ -12,31 +12,27 @@ Beautiful terminal interface for professional iOS crash symbolication. Send IPS 
 - ⚡ **Fast & Reliable** - Optimized for quick processing with proper error handling
 - 🛠️ **Cross-Platform** - Works on macOS, Linux, and Windows
 
-## 📦 Installation
+## 📦 Installation (Airgap/Offline)
 
-### Quick Installation
+> **IMPORTANT: In airgap/offline mode, the CLI is pre-bundled with the system. No external downloads required.**
+
+### Method 1: Use Pre-bundled CLI (Recommended for Airgap)
+The CLI tool is automatically included in the Docker deployment and accessible via:
 ```bash
-curl -sSL https://github.com/mosiko1234/ipsw-auto-symbolicate-server/raw/main/install_cli.sh | bash
+# The CLI is pre-installed and ready to use
+ipsw-cli crash.ips
 ```
 
-### Manual Installation
+### Method 2: Manual Installation (if needed)
+If you need to install the CLI separately:
+```bash
+# Copy from deployment package
+cp ipsw_cli.py ~/.local/bin/ipsw-cli
+chmod +x ~/.local/bin/ipsw-cli
 
-1. **Download the CLI script:**
-   ```bash
-   wget https://github.com/mosiko1234/ipsw-auto-symbolicate-server/raw/main/ipsw_cli.py
-   chmod +x ipsw_cli.py
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   pip3 install --user requests rich colorama
-   ```
-
-3. **Move to PATH (optional):**
-   ```bash
-   mv ipsw_cli.py ~/.local/bin/ipsw-cli
-   export PATH="$HOME/.local/bin:$PATH"
-   ```
+# Install dependencies (if not already installed)
+pip3 install --user requests rich colorama
+```
 
 ## 🎯 Usage Examples
 
@@ -254,3 +250,69 @@ Licensed under the MIT License.
 **Made with ❤️ for iOS developers**
 
 For more information, visit: https://github.com/mosiko1234/ipsw-auto-symbolicate-server 
+
+## 🚀 Features & Capabilities
+
+### 🔍 Smart Device Detection
+The CLI automatically handles device mapping using the integrated AppleDB:
+```bash
+# Input crash report with "iPhone 14 Pro"
+ipsw-cli crash.ips
+
+# CLI automatically:
+# 1. Detects device: "iPhone 14 Pro"
+# 2. Maps to identifier: "iPhone15,2" 
+# 3. Finds matching IPSW: "iPhone15,2_18.5_22F76_Restore.ipsw"
+# 4. Extracts 21,206+ symbols
+# 5. Returns fully symbolicated crash
+```
+
+### 📊 Enhanced Statistics
+```
+Device: iPhone 14 Pro (mapped from iPhone15,2)
+iOS Version: iPhone OS 18.5 (22F76)
+Symbols Found: 21,206 kernel symbols
+Unknown Symbols: 0
+Success Rate: 100%
+Processing Time: ~30 seconds
+```
+
+### 🎨 Rich Output Examples
+
+#### Successful Symbolication
+```
+╔══════════════════════════════════════════════════════════════════════════════════════════╗
+║                          🚀 IPSW Symbol Server CLI                                       ║
+║                      Professional iOS Crash Symbolication                               ║
+╚══════════════════════════════════════════════════════════════════════════════════════════╝
+
+📁 File Information
+┌──────────┬──────────────────────────────┐
+│ Property │ Value                        │
+├──────────┼──────────────────────────────┤
+│ Filename │ crash-iPhone14Pro-18.5.ips   │
+│ Size     │ 1,522,271 bytes              │
+│ Status   │ ✅ Ready for symbolication   │
+└──────────┴──────────────────────────────┘
+
+📱 Device & Crash Information
+┌─────────────────┬────────────────────────┐
+│ Property        │ Value                  │
+├─────────────────┼────────────────────────┤
+│ Device          │ iPhone 14 Pro          │
+│ Mapped To       │ iPhone15,2             │
+│ iOS Version     │ iPhone OS 18.5 (22F76) │
+│ Process         │ SpringBoard            │
+│ Bug Type        │ 109                    │
+└─────────────────┴────────────────────────┘
+
+📊 Symbolication Statistics
+┌──────────────────┬────────┬───────────┐
+│ Metric           │  Count │ Status    │
+├──────────────────┼────────┼───────────┤
+│ Symbols Found    │ 21,206 │ ✅        │
+│ Unknown Symbols  │      0 │ ❓        │
+│ Kernel Addresses │    156 │ 🔧        │
+│ Success Rate     │ 100.0% │ Excellent │
+└──────────────────┴────────┴───────────┘
+``` 

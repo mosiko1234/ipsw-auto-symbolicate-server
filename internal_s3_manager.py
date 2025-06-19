@@ -645,7 +645,14 @@ class InternalS3Manager:
         
         files = []
         for file_info in self._bucket_cache.values():
-            if device_filter is None or device_filter.lower() in file_info['device'].lower():
+            # If no filter, include all files
+            if device_filter is None:
+                include_file = True
+            else:
+                # Use the same device matching logic as find_ipsw
+                include_file = self._device_matches(file_info['device'], device_filter)
+                
+            if include_file:
                 files.append({
                     'device': file_info['device'],
                     'version': file_info['version'],
