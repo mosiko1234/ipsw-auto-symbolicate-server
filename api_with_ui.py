@@ -426,9 +426,19 @@ async def auto_scan(request: AutoScanRequest):
     try:
         logger.info(f"Auto-scan request: {request.device_model} {request.ios_version} {request.build_number}")
         
+        # Try to map device name to identifier if device mapper is available
+        search_device = request.device_model
+        if device_mapper:
+            device_identifier = device_mapper.get_device_identifier(request.device_model)
+            if device_identifier:
+                logger.info(f"Mapped device '{request.device_model}' to identifier '{device_identifier}'")
+                search_device = device_identifier
+            else:
+                logger.info(f"No mapping found for '{request.device_model}', using original name")
+        
         # Search for matching IPSW file
         file_info = await s3_manager.find_ipsw(
-            device_model=request.device_model,
+            device_model=search_device,
             os_version=request.ios_version,
             build_number=request.build_number
         )
@@ -441,7 +451,7 @@ async def auto_scan(request: AutoScanRequest):
             
             # Start download in background
             download_success, download_message, local_path = await s3_manager.download_ipsw(
-                device_model=request.device_model,
+                device_model=search_device,
                 os_version=request.ios_version,
                 build_number=request.build_number
             )
