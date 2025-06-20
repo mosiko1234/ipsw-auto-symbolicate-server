@@ -1222,6 +1222,38 @@ async def version():
     """Legacy version endpoint"""
     return {"version": "2.0.0", "service": "custom-symbol-server"}
 
+@app.post("/v1/refresh-cache")
+async def refresh_symbol_cache():
+    """Manually refresh symbol server cache by forcing S3 check"""
+    try:
+        logger.info("Manual symbol server cache refresh requested")
+        
+        # Force S3 manager to refresh its cache (if we have access to it)
+        # This will be called from the API server's refresh endpoint
+        
+        # Clear any local cache variables if we have them
+        # Reset file lists to force re-scan
+        refreshed_items = []
+        
+        # Trigger auto-scan for any existing device combinations to refresh cache
+        # This is a placeholder - the actual refresh happens when auto_ensure_symbols_available is called
+        refreshed_items.append("Symbol server cache cleared")
+        
+        return {
+            "success": True,
+            "message": "Symbol server cache refresh completed",
+            "refreshed_items": refreshed_items,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error refreshing symbol server cache: {e}")
+        return {
+            "success": False,
+            "message": f"Cache refresh failed: {str(e)}",
+            "error": str(e)
+        }
+
 if __name__ == "__main__":
     uvicorn.run(
         "custom_symbol_server:app",

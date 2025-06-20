@@ -326,7 +326,7 @@ class InternalS3Manager:
             
             logger.info(f"Parsed file info: {file_info}, cache_key: {cache_key}")
             
-            self._bucket_cache[cache_key] = {
+            cache_entry = {
                 'key': filename,
                 'size': size,
                 'modified': modified,
@@ -335,6 +335,13 @@ class InternalS3Manager:
                 'build': file_info['build'],
                 'url': f"{self.bucket_url}/{quote(filename)}"
             }
+            
+            # Add device_models if available for multi-device IPSW support
+            if 'device_models' in file_info and file_info['device_models']:
+                cache_entry['device_models'] = file_info['device_models']
+                logger.info(f"Multi-device IPSW detected: {file_info['device_models']}")
+            
+            self._bucket_cache[cache_key] = cache_entry
             logger.info(f"Added to cache: {cache_key}")
         else:
             logger.warning(f"Failed to parse IPSW filename: {filename}")
@@ -361,8 +368,40 @@ class InternalS3Manager:
                 match = re.search(pattern, filename, re.IGNORECASE)
                 if match:
                     groups = match.groups()
+                    device_part = groups[0].replace('_', ' ')  # Normalize device name
+                    
+                    # Handle multiple device models in the filename (e.g., "iPhone12,3,iPhone12,5")
+                    device_models = []
+                    if ',' in device_part and not device_part.count(',') == 1:
+                        # This might be multiple device models separated by commas
+                        # Split by commas and check if each part looks like a device identifier
+                        parts = device_part.split(',')
+                        current_device = ""
+                        for part in parts:
+                            if current_device:
+                                # Check if this part looks like a model number (just digits)
+                                if part.strip().isdigit():
+                                    # Complete the current device
+                                    device_models.append(f"{current_device},{part.strip()}")
+                                    current_device = ""
+                                else:
+                                    # This is a new device
+                                    device_models.append(current_device)
+                                    current_device = part.strip()
+                            else:
+                                current_device = part.strip()
+                        
+                        # Don't forget the last device if it doesn't have a comma
+                        if current_device:
+                            device_models.append(current_device)
+                    else:
+                        # Single device model
+                        device_models = [device_part]
+                    
+                    # Return the parsed info with all device models
                     return {
-                        'device': groups[0].replace('_', ' '), # Normalize device name
+                        'device': device_part,  # Original device string
+                        'device_models': device_models,  # List of individual device models
                         'version': groups[1],
                         'build': groups[2] if len(groups) > 2 else None
                     }
@@ -396,25 +435,46 @@ class InternalS3Manager:
 
         # Iterate through all cached files and check for a match
         for file_info in self._bucket_cache.values():
-            # Normalize the device name from the cache
-            cached_device_norm = file_info['device'].lower().replace(' ', '').replace('_', '')
-            cached_device_norm_no_comma = re.sub(r'[^a-z0-9]', '', cached_device_norm)
+            # Check version and build first (faster)
+            version_matches = file_info['version'] == os_version
+            build_matches = build_number is None or file_info['build'] == build_number
             
-            # Check if any candidate matches the cached device name
+            if not (version_matches and build_matches):
+                continue
+            
+            # Now check device matching - handle both single and multi-device IPSW files
             device_match_found = False
-            for candidate in device_candidates:
-                if candidate in cached_device_norm or candidate in cached_device_norm_no_comma:
-                    device_match_found = True
-                    break
+            
+            # Check against individual device models if available
+            if 'device_models' in file_info and file_info['device_models']:
+                for ipsw_device in file_info['device_models']:
+                    # Normalize the device name from the IPSW
+                    cached_device_norm = ipsw_device.lower().replace(' ', '').replace('_', '')
+                    cached_device_norm_no_comma = re.sub(r'[^a-z0-9]', '', cached_device_norm)
+                    
+                    # Check if any candidate matches this device model
+                    for candidate in device_candidates:
+                        if candidate in cached_device_norm or candidate in cached_device_norm_no_comma:
+                            device_match_found = True
+                            logger.info(f"Device match found: '{device_model}' matches '{ipsw_device}' in file {file_info['key']}")
+                            break
+                    
+                    if device_match_found:
+                        break
+            else:
+                # Fallback to original device matching logic
+                cached_device_norm = file_info['device'].lower().replace(' ', '').replace('_', '')
+                cached_device_norm_no_comma = re.sub(r'[^a-z0-9]', '', cached_device_norm)
+                
+                # Check if any candidate matches the cached device name
+                for candidate in device_candidates:
+                    if candidate in cached_device_norm or candidate in cached_device_norm_no_comma:
+                        device_match_found = True
+                        break
             
             if device_match_found:
-                # Now check for version and build match
-                version_matches = file_info['version'] == os_version
-                build_matches = build_number is None or file_info['build'] == build_number
-                
-                if version_matches and build_matches:
-                    logger.info(f"Found a matching IPSW file: {file_info['key']}")
-                    return file_info
+                logger.info(f"Found a matching IPSW file: {file_info['key']}")
+                return file_info
         
         logger.warning(f"IPSW not found for: {device_model} {os_version} {build_number}")
         return None

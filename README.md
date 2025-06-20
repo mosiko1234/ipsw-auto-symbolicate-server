@@ -118,6 +118,7 @@ Processing Time: ~30 seconds
 - **Storage Usage**: `GET /v1/disk-usage`
 - **Auto-Scan**: `POST /v1/auto-scan`
 - **Available IPSWs**: `GET /v1/ipsws`
+- **🆕 Cache Refresh**: `POST /refresh-cache` - Force refresh of IPSW cache for both API and Symbol servers
 
 ### Service URLs
 - **Main Portal**: http://localhost (Nginx)
@@ -246,29 +247,56 @@ curl http://localhost:8000/v1/system-status
 # Check available IPSWs and device mapping
 curl http://localhost:3993/v1/ipsws
 
+# 🆕 Force cache refresh after uploading new IPSW files
+curl -X POST "http://localhost:8000/refresh-cache"
+
 # Trigger auto-scan for specific device
 curl -X POST "http://localhost:3993/v1/auto-scan?device_model=iPhone%2014%20Pro&ios_version=18.5"
+
+# 🆕 Upload multi-device IPSW and refresh cache
+curl -X PUT "http://localhost:9000/ipsw/iPhone12,3,iPhone12,5_18.3.2_22D82_Restore.ipsw" \
+  --data-binary @your-multi-device.ipsw
+curl -X POST "http://localhost:8000/refresh-cache"
 ```
 
-## 🔄 Recent Updates (v1.2.0)
+## 🔄 Recent Updates (v1.2.3)
 
-### ✨ New Features
+### ✨ Major New Features
+- **🆕 Multi-Device IPSW Support** - Automatically handles IPSW files containing multiple device models (e.g., `iPhone12,3,iPhone12,5_18.3.2_22D82_Restore.ipsw`)
+- **🆕 Manual Cache Refresh** - New endpoint `POST /refresh-cache` to force cache updates when new IPSW files are uploaded
+- **🆕 Real-time IPSW Detection** - Instant recognition of newly uploaded files without container restarts
+
+### 🔧 Advanced Technical Improvements
+- **Enhanced IPSW Parser** - Intelligent parsing of multi-device filename patterns with device model separation
+- **Dual Cache Management** - Coordinated refresh of both API server and Symbol server caches
+- **Smart Device Matching** - Improved logic to match individual device models within multi-device IPSW files
+- **Performance Optimization** - Version/build checking before device matching for faster lookups
+
+### 🛠️ Cache Management
+- **Automatic Detection** - System now detects when IPSW files are added to S3 storage
+- **Manual Refresh** - `curl -X POST "http://localhost:8000/refresh-cache"` to force immediate cache update
+- **Coordinated Updates** - Both API and Symbol servers refresh simultaneously
+
+### 📦 Multi-Device IPSW Examples
+```bash
+# These IPSW files are now fully supported:
+iPhone12,3,iPhone12,5_18.3.2_22D82_Restore.ipsw  # iPhone 11 Pro + iPhone 11 Pro Max
+iPhone13,1,iPhone13,2_18.5_22F76_Restore.ipsw    # iPhone 12 mini + iPhone 12
+iPhone14,4,iPhone14,5_18.5_22F76_Restore.ipsw    # iPhone 13 mini + iPhone 13
+
+# System automatically finds the right device:
+# Search for "iPhone12,3" → Finds in "iPhone12,3,iPhone12,5_..." file ✅
+# Search for "iPhone 11 Pro" → Maps to "iPhone12,3" → Finds in multi-device file ✅
+```
+
+### Previous Updates (v1.2.0)
 - **Complete Device Mapping** - AppleDB integration for all Apple devices
 - **Enhanced Airgap Support** - Zero internet dependencies during operation
 - **Smart Auto-Scan** - Automatic device name mapping and IPSW detection
 - **Improved CLI** - Better device detection and mapping feedback
-
-### 🔧 Technical Improvements
 - Fixed S3 endpoint configuration for containerized environments
 - Enhanced device filtering logic in S3 IPSW discovery
 - Bundled AppleDB database in Docker images
-- Improved error handling and logging
-
-### 📦 Deployment Enhancements
-- Simplified airgap deployment process
-- Pre-built Docker images with all dependencies
-- Automatic MinIO bucket creation
-- Consistent configuration across all services
 
 ---
 

@@ -501,8 +501,18 @@ async def download_ipsw_endpoint(request: AutoScanRequest):
     try:
         logger.info(f"Download request: {request.device_model} {request.ios_version} {request.build_number}")
         
+        # Try to map device name to identifier if device mapper is available
+        search_device = request.device_model
+        if device_mapper:
+            device_identifier = device_mapper.get_device_identifier(request.device_model)
+            if device_identifier:
+                logger.info(f"Mapped device '{request.device_model}' to identifier '{device_identifier}'")
+                search_device = device_identifier
+            else:
+                logger.info(f"No mapping found for '{request.device_model}', using original name")
+        
         download_success, download_message, local_path = await s3_manager.download_ipsw(
-            device_model=request.device_model,
+            device_model=search_device,
             os_version=request.ios_version,
             build_number=request.build_number
         )
@@ -554,6 +564,53 @@ async def list_available_ipsw():
     except Exception as e:
         logger.error(f"Error listing IPSW files: {e}")
         raise HTTPException(status_code=500, detail=f"Error listing files: {str(e)}")
+
+@app.post("/refresh-cache")
+async def refresh_ipsw_cache():
+    """Manually refresh IPSW cache for both API server and Symbol server"""
+    if not s3_manager:
+        raise HTTPException(status_code=503, detail="S3 manager not available")
+    
+    try:
+        logger.info("Manual cache refresh requested")
+        
+        # Refresh API server cache
+        await s3_manager.refresh_bucket_cache()
+        api_files = await s3_manager.list_available_ipsw()
+        
+        # Trigger Symbol server cache refresh by calling its auto-scan endpoint
+        symbol_refresh_success = False
+        symbol_message = "Symbol server refresh not attempted"
+        
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Call symbol server to trigger its cache refresh
+                response = await client.post(f"{SYMBOL_SERVER_URL}/v1/refresh-cache")
+                if response.status_code == 200:
+                    symbol_refresh_success = True
+                    symbol_message = "Symbol server cache refreshed successfully"
+                else:
+                    symbol_message = f"Symbol server cache refresh failed: {response.status_code}"
+        except Exception as e:
+            symbol_message = f"Symbol server cache refresh error: {str(e)}"
+        
+        return {
+            "success": True,
+            "message": "Cache refresh completed",
+            "api_server": {
+                "success": True,
+                "total_files": len(api_files),
+                "files": [f['filename'] for f in api_files]
+            },
+            "symbol_server": {
+                "success": symbol_refresh_success,
+                "message": symbol_message
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Cache refresh error: {e}")
+        raise HTTPException(status_code=500, detail=f"Cache refresh error: {str(e)}")
 
 @app.get("/health")
 async def health_check():
