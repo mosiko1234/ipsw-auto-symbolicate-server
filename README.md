@@ -4,6 +4,8 @@ Enterprise-ready iOS crash symbolication system with **unified deployment** supp
 
 ## 🎯 Key Features
 
+✅ **Fully Automated Workflow** - True end-to-end automation from IPSW upload to symbolication (v1.2.4)  
+✅ **Real-Time S3 Detection** - Symbol Server automatically detects new files without manual restarts  
 ✅ **Unified Deployment** - Single Docker Compose file for all environments  
 ✅ **Complete Airgap Support** - Pre-built images with all dependencies for secure offline deployments  
 ✅ **Auto-Symbolication** - Intelligent IPSW detection, download, and symbol extraction  
@@ -23,6 +25,8 @@ cd ipsw-auto-symbolicate-server
 ./deploy-regular.sh
 ```
 **Access**: http://localhost
+
+> **✨ NEW in v1.2.4**: Upload IPSW files to S3 and the system automatically detects, processes, and generates symbols within 5 minutes. No manual intervention required!
 
 ### Airgap/Offline Deployment (no internet required)
 > **IMPORTANT: In airgap/offline mode, all dependencies (AppleDB, symbolicator, CLI, IPSW, etc.) are pre-included. No internet access required during operation.**
@@ -259,7 +263,38 @@ curl -X PUT "http://localhost:9000/ipsw/iPhone12,3,iPhone12,5_18.3.2_22D82_Resto
 curl -X POST "http://localhost:8000/refresh-cache"
 ```
 
-## 🔄 Recent Updates (v1.2.3)
+## 🔄 Recent Updates (v1.2.4)
+
+### 🐛 CRITICAL FIX: Symbol Server S3 Synchronization
+- **🚨 Fixed Symbol Server Auto-Detection** - Symbol Server now automatically detects new IPSW files from S3 without manual restart
+- **🔧 Persistent S3Manager** - Added persistent S3Manager to Symbol Server, eliminating temporary instance issues
+- **⚡ Enhanced Cache Refresh** - Fixed refresh-cache endpoint to work seamlessly with Symbol Server
+- **🚀 True End-to-End Automation** - System now works as originally intended - fully automated from IPSW upload to symbolication
+
+### 🛠️ Technical Improvements
+- **Real-Time S3 Detection** - Symbol Server now maintains persistent connection to S3 storage
+- **Improved File Watcher Integration** - Enhanced coordination between File Watcher and Symbol Server
+- **FUSE Support Enhancement** - Better IPSW extraction capabilities with apfs-fuse integration
+- **Memory Optimization** - Reduced container restart requirements with persistent managers
+
+### 📈 Workflow Now Fully Automated
+```bash
+# Before v1.2.4 (required manual intervention):
+aws s3 cp newfile.ipsw s3://ipsw/                    # Upload
+# Manual: docker-compose restart symbol-server       # ❌ Required
+# Manual: curl -X POST ".../refresh-cache"           # ❌ Required  
+# Manual: curl -X POST ".../auto-scan"               # ❌ Required
+
+# After v1.2.4 (fully automated):
+aws s3 cp newfile.ipsw s3://ipsw/                    # Upload
+# Wait 5 minutes - File Watcher detects automatically
+# Symbol Server auto-refreshes cache
+# Auto-scan runs automatically  
+# Symbols generated automatically
+ipsw-cli newcrash.ips                                # ✅ Just works!
+```
+
+### Previous Updates (v1.2.3)
 
 ### ✨ Major New Features
 - **🆕 Multi-Device IPSW Support** - Automatically handles IPSW files containing multiple device models (e.g., `iPhone12,3,iPhone12,5_18.3.2_22D82_Restore.ipsw`)
