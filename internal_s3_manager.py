@@ -264,16 +264,39 @@ class InternalS3Manager:
             root = ET.fromstring(xml_content)
             
             # Handle different XML namespaces
+            # Try with namespace first (MinIO uses S3 namespace)
             namespace = {'s3': 'http://s3.amazonaws.com/doc/2006-03-01/'}
-            if not root.findall('.//s3:Contents', namespace):
+            contents_with_ns = root.findall('.//s3:Contents', namespace)
+            
+            if contents_with_ns:
+                # Use namespace - this is the correct path for MinIO
+                use_namespace = True
+                logger.info(f"Using XML namespace, found {len(contents_with_ns)} items")
+            else:
+                # Try without namespace for other S3 implementations
+                use_namespace = False
                 namespace = {}
+                contents_without_ns = root.findall('.//Contents')
+                logger.info(f"Using no namespace, found {len(contents_without_ns)} items")
             
             self._bucket_cache = {}
             
-            for content in root.findall('.//Contents' if not namespace else './/s3:Contents', namespace):
-                key_elem = content.find('Key' if not namespace else 's3:Key', namespace)
-                size_elem = content.find('Size' if not namespace else 's3:Size', namespace)
-                modified_elem = content.find('LastModified' if not namespace else 's3:LastModified', namespace)
+            # Select the correct xpath and namespace based on what worked
+            if use_namespace:
+                xpath = './/s3:Contents'
+                key_path = 's3:Key'
+                size_path = 's3:Size' 
+                modified_path = 's3:LastModified'
+            else:
+                xpath = './/Contents'
+                key_path = 'Key'
+                size_path = 'Size'
+                modified_path = 'LastModified'
+            
+            for content in root.findall(xpath, namespace):
+                key_elem = content.find(key_path, namespace)
+                size_elem = content.find(size_path, namespace)
+                modified_elem = content.find(modified_path, namespace)
                 
                 if key_elem is not None and key_elem.text.endswith('.ipsw'):
                     await self._process_ipsw_file(
@@ -284,6 +307,7 @@ class InternalS3Manager:
                         
         except Exception as e:
             logger.error(f"Error parsing S3 XML listing: {e}")
+            logger.error(f"XML content: {xml_content[:500]}")  # Add debug info
     
     async def _parse_html_listing(self, html_content: str) -> None:
         """Parse HTML index page to extract IPSW files"""

@@ -9,6 +9,7 @@ import json
 import uuid
 import time
 import logging
+import asyncio
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple
 from datetime import datetime
@@ -25,6 +26,8 @@ import httpx
 from internal_s3_manager import InternalS3Manager
 # Import the new Device Mapping Manager
 from device_mapping_manager import DeviceMappingManager
+# Import S3 File Watcher for auto-detection
+from s3_file_watcher import start_file_watcher, stop_file_watcher, get_watcher_status
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -85,6 +88,33 @@ try:
 except Exception as e:
     logger.error(f"Failed to initialize Device Mapping Manager: {e}")
     device_mapper = None
+
+# Startup and shutdown handlers for file watcher
+@app.on_event("startup")
+async def startup_event():
+    """Start background services"""
+    if s3_manager:
+        # Check if file watcher is enabled
+        file_watcher_enabled = os.getenv("FILE_WATCHER_ENABLED", "true").lower() == "true"
+        
+        if file_watcher_enabled:
+            # Get configuration from environment
+            check_interval = int(os.getenv("S3_CHECK_INTERVAL", "300"))  # 5 minutes default
+            
+            # Start S3 file watcher for auto-detection
+            await start_file_watcher(
+                s3_manager=s3_manager,
+                symbol_server_url=SYMBOL_SERVER_URL
+            )
+            logger.info(f"S3 file watcher started (check interval: {check_interval}s)")
+        else:
+            logger.info("File watcher disabled by configuration")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop background services"""
+    stop_file_watcher()
+    logger.info("S3 file watcher stopped")
 
 class SymbolicationResult(BaseModel):
     success: bool
@@ -614,7 +644,49 @@ async def refresh_ipsw_cache():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "version": "3.0.0"}
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+@app.get("/file-watcher/status")
+async def get_file_watcher_status():
+    """Get S3 file watcher status"""
+    status = await get_watcher_status()
+    if status:
+        return {
+            "success": True,
+            "watcher": status
+        }
+    else:
+        return {
+            "success": False,
+            "message": "File watcher not running"
+        }
+
+@app.post("/file-watcher/restart")
+async def restart_file_watcher():
+    """Restart the S3 file watcher"""
+    if not s3_manager:
+        raise HTTPException(status_code=503, detail="S3 manager not available")
+    
+    try:
+        # Stop existing watcher
+        stop_file_watcher()
+        
+        # Wait a moment
+        await asyncio.sleep(1)
+        
+        # Start new watcher
+        await start_file_watcher(
+            s3_manager=s3_manager,
+            symbol_server_url=SYMBOL_SERVER_URL
+        )
+        
+        return {
+            "success": True,
+            "message": "File watcher restarted successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error restarting file watcher: {e}")
+        raise HTTPException(status_code=500, detail=f"Restart error: {str(e)}")
 
 @app.get("/api/status")
 async def api_status():

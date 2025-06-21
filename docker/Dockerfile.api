@@ -33,6 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY api_with_ui.py .
 COPY internal_s3_manager.py .
 COPY device_mapping_manager.py .
+COPY s3_file_watcher.py .
 COPY templates/ templates/
 COPY static/ static/
 

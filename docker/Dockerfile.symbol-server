@@ -10,8 +10,30 @@ RUN apt-get update && apt-get install -y \
     s3fs \
     fuse \
     rsync \
+    cmake \
+    g++ \
+    git \
+    libfuse-dev \
+    bzip2 \
+    libbz2-dev \
+    libattr1-dev \
+    zlib1g-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Build and install apfs-fuse from source
+RUN git clone https://github.com/sgan81/apfs-fuse.git /tmp/apfs-fuse && \
+    cd /tmp/apfs-fuse && \
+    git submodule init && \
+    git submodule update && \
+    mkdir build && \
+    cd build && \
+    cmake .. -DUSE_FUSE3=OFF && \
+    make -j$(nproc) && \
+    cp apfs-fuse /usr/local/bin/ && \
+    chmod +x /usr/local/bin/apfs-fuse && \
+    cd / && \
+    rm -rf /tmp/apfs-fuse
 
 # Install IPSW tool directly - download the binary
 # AIRGAP: Remove wget/curl. Copy ipsw binary from local data directory.

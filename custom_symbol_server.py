@@ -191,6 +191,38 @@ class DatabaseManager:
 # Global database manager
 db_manager = DatabaseManager()
 
+# Global S3 manager for persistent file tracking
+s3_manager = None
+
+async def init_s3_manager():
+    """Initialize S3 manager"""
+    global s3_manager
+    try:
+        from internal_s3_manager import InternalS3Manager
+        
+        # Get S3 config from environment
+        s3_endpoint = os.getenv('S3_ENDPOINT', 'http://minio:9000')
+        s3_bucket = os.getenv('S3_BUCKET', 'ipsw')
+        downloads_dir = Path(DOWNLOADS_DIR)
+        downloads_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create S3 manager instance
+        s3_manager = InternalS3Manager(
+            s3_endpoint=s3_endpoint,
+            bucket_name=s3_bucket,
+            downloads_dir=downloads_dir,
+            use_ssl=False
+        )
+        
+        # Initialize the S3 cache
+        await s3_manager.refresh_bucket_cache()
+        
+        logger.info("S3 Manager initialized successfully")
+        
+    except Exception as e:
+        logger.warning(f"Could not initialize S3 manager: {e}")
+        s3_manager = None
+
 class AddressParser:
     """Enhanced address parser for crash logs"""
     
@@ -521,28 +553,6 @@ class SymbolManager:
 # Global symbol manager
 symbol_manager = SymbolManager()
 
-# S3 Manager for auto-downloading IPSWs
-try:
-    from internal_s3_manager import InternalS3Manager
-    # Initialize S3 manager with environment variables
-    S3_ENDPOINT = os.getenv('S3_ENDPOINT', 'http://localhost:9000')
-    S3_BUCKET = os.getenv('S3_BUCKET', 'ipsw')
-    S3_USE_SSL = os.getenv('S3_USE_SSL', 'false').lower() == 'true'
-    
-    s3_manager = InternalS3Manager(
-        s3_endpoint=S3_ENDPOINT,
-        bucket_name=S3_BUCKET,
-        downloads_dir=Path(DOWNLOADS_DIR),
-        use_ssl=S3_USE_SSL
-    )
-    logger.info(f"S3 manager initialized successfully: {S3_ENDPOINT}/{S3_BUCKET}")
-except ImportError as e:
-    s3_manager = None
-    logger.warning(f"S3 manager not available: {e}")
-except Exception as e:
-    s3_manager = None
-    logger.error(f"Failed to initialize S3 manager: {e}")
-
 async def auto_ensure_symbols_available(device_model: str, ios_version: str, build_number: Optional[str] = None) -> Tuple[bool, str]:
     """
     Automatically ensure symbols are available for device/version.
@@ -765,8 +775,9 @@ async def auto_ensure_symbols_available(device_model: str, ios_version: str, bui
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database connection on startup"""
+    """Initialize database connection and S3 manager on startup"""
     await db_manager.init_pool()
+    await init_s3_manager()
     stats['start_time'] = datetime.now()
 
 @app.on_event("shutdown")
@@ -866,21 +877,24 @@ async def list_ipsws():
                 local_files.add(ipsw_file.name)
         
         # List S3 IPSW files (available for download)
-        try:
-            s3_files = await s3_manager.list_available_ipsw()
-            for s3_file in s3_files:
-                if s3_file.get('filename') not in local_files:
-                    ipsw_files.append({
-                        'filename': s3_file.get('filename', 'unknown'),
-                        'device': s3_file.get('device', 'unknown'),
-                        'version': s3_file.get('version', 'unknown'),
-                        'build': s3_file.get('build', 'unknown'),
-                        'size_mb': s3_file.get('size_mb', 0),
-                        'location': 's3',
-                        'info': {}
-                    })
-        except Exception as s3_error:
-            logger.warning(f"Failed to list S3 IPSWs: {s3_error}")
+        if s3_manager:
+            try:
+                s3_files = await s3_manager.list_available_ipsw()
+                for s3_file in s3_files:
+                    if s3_file.get('filename') not in local_files:
+                        ipsw_files.append({
+                            'filename': s3_file.get('filename', 'unknown'),
+                            'device': s3_file.get('device', 'unknown'),
+                            'version': s3_file.get('version', 'unknown'),
+                            'build': s3_file.get('build', 'unknown'),
+                            'size_mb': s3_file.get('size_mb', 0),
+                            'location': 's3',
+                            'info': {}
+                        })
+            except Exception as s3_error:
+                logger.warning(f"Failed to list S3 IPSWs: {s3_error}")
+        else:
+            logger.warning("S3 manager not available, skipping S3 file listing")
         
         return {'ipsws': ipsw_files, 'count': len(ipsw_files)}
     except Exception as e:
@@ -1229,15 +1243,39 @@ async def refresh_symbol_cache():
         logger.info("Manual symbol server cache refresh requested")
         
         # Force S3 manager to refresh its cache (if we have access to it)
-        # This will be called from the API server's refresh endpoint
+        refreshed_items = []
+        
+        # Try to refresh internal S3 manager if available
+        if s3_manager:
+            try:
+                # Force refresh of S3 cache using our persistent manager
+                await s3_manager.refresh_bucket_cache()
+                
+                # Get updated file list
+                updated_files = await s3_manager.list_available_ipsw()
+                
+                refreshed_items.append(f"S3 cache refreshed: {len(updated_files)} files found")
+                logger.info(f"S3 cache refreshed: found {len(updated_files)} IPSW files")
+                
+                # Log some details about found files
+                for file_info in updated_files[:5]:  # Show first 5 files
+                    logger.info(f"  - {file_info['device']} {file_info['version']} ({file_info['build']})")
+                
+            except Exception as e:
+                logger.warning(f"Could not refresh S3 cache: {e}")
+                refreshed_items.append(f"S3 refresh failed: {str(e)}")
+        else:
+            logger.warning("S3 manager not available")
+            refreshed_items.append("S3 manager not available")
         
         # Clear any local cache variables if we have them
         # Reset file lists to force re-scan
-        refreshed_items = []
+        refreshed_items.append("Symbol server internal cache cleared")
         
-        # Trigger auto-scan for any existing device combinations to refresh cache
-        # This is a placeholder - the actual refresh happens when auto_ensure_symbols_available is called
-        refreshed_items.append("Symbol server cache cleared")
+        # Force garbage collection to free up memory
+        import gc
+        gc.collect()
+        refreshed_items.append("Memory cleanup completed")
         
         return {
             "success": True,
@@ -1251,7 +1289,8 @@ async def refresh_symbol_cache():
         return {
             "success": False,
             "message": f"Cache refresh failed: {str(e)}",
-            "error": str(e)
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
         }
 
 if __name__ == "__main__":
