@@ -319,8 +319,8 @@ class SymbolServerManager:
     
     async def download_signatures(self, ios_version: str = "latest") -> bool:
         # AIRGAP: Only use local symbolicator signatures. Never clone or update from internet.
-        signatures_repo_dir = self.signatures_dir / "symbolicator"
-        if not signatures_repo_dir.exists():
+            signatures_repo_dir = self.signatures_dir / "symbolicator"
+            if not signatures_repo_dir.exists():
             logger.error("[AIRGAP] Symbolicator signatures not found locally. Airgap mode requires local copy.")
             return False
         logger.info("[AIRGAP] Using local symbolicator signatures only.")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-IPSW Symbol Server CLI Tool
+IPSW Symbol Server CLI Tool - Unified Local & Network Client
 Beautiful terminal interface for symbolication requests
 """
 
@@ -9,6 +9,7 @@ import requests
 import json
 import sys
 import os
+import subprocess
 from pathlib import Path
 from datetime import datetime
 import time
@@ -39,13 +40,23 @@ except ImportError:
 class IPSWCLIFormatter:
     """Beautiful terminal formatter for IPSW symbolication results"""
     
-    def __init__(self):
+    def __init__(self, mode="local"):
         self.console = Console() if RICH_AVAILABLE else None
+        self.mode = mode  # "local" or "network"
         
     def print_banner(self):
         """Print a beautiful banner"""
         if RICH_AVAILABLE:
-            banner = """
+            if self.mode == "network":
+                banner = """
+╔═══════════════════════════════════════════════════════════════╗
+║              🌐 IPSW Symbol Server CLI - Network              ║
+║              Professional iOS Crash Symbolication            ║
+║                     Remote Server Client                     ║
+╚═══════════════════════════════════════════════════════════════╝
+"""
+            else:
+                banner = """
 ╔═══════════════════════════════════════════════════════════════╗
 ║                  🚀 IPSW Symbol Server CLI                   ║
 ║              Professional iOS Crash Symbolication            ║
@@ -64,12 +75,32 @@ class IPSWCLIFormatter:
         if COLORAMA_AVAILABLE:
             print(f"{Fore.CYAN}{Style.BRIGHT}")
         print("=" * 65)
-        print("🚀 IPSW Symbol Server CLI - Professional iOS Crash Symbolication")
+        if self.mode == "network":
+            print("🌐 IPSW Symbol Server CLI - Network Client")
+        else:
+            print("🚀 IPSW Symbol Server CLI - Professional iOS Crash Symbolication")
         print("=" * 65)
         if COLORAMA_AVAILABLE:
             print(f"{Style.RESET_ALL}")
     
-    def print_file_info(self, filename, size):
+    def print_connection_info(self, server_url, is_local=True):
+        """Print connection information"""
+        if RICH_AVAILABLE:
+            table = Table(title="🔗 Connection Information", box=box.ROUNDED)
+            table.add_column("Property", style="bold cyan")
+            table.add_column("Value", style="white")
+            table.add_row("Server URL", server_url)
+            table.add_row("Mode", "Local Server" if is_local else "Remote Server")
+            table.add_row("Status", "✅ Ready to connect")
+            self.console.print(table)
+        else:
+            self._print_fallback_info("Connection Information", [
+                ("Server URL", server_url),
+                ("Mode", "Local Server" if is_local else "Remote Server"),
+                ("Status", "✅ Ready to connect")
+            ])
+    
+    def print_file_info(self, filename, size, server_url):
         """Print file information"""
         if RICH_AVAILABLE:
             table = Table(title="📁 File Information", box=box.ROUNDED)
@@ -77,16 +108,18 @@ class IPSWCLIFormatter:
             table.add_column("Value", style="white")
             table.add_row("Filename", filename)
             table.add_row("Size", f"{size:,} bytes")
+            table.add_row("Server", server_url)
             table.add_row("Status", "✅ Ready for upload")
             self.console.print(table)
         else:
             self._print_fallback_info("File Information", [
                 ("Filename", filename),
                 ("Size", f"{size:,} bytes"),
+                ("Server", server_url),
                 ("Status", "✅ Ready for upload")
             ])
     
-    def print_local_ipsw_info(self, ipsw_filename, ipsw_size, ips_filename, ips_size):
+    def print_local_ipsw_info(self, ipsw_filename, ipsw_size, ips_filename, ips_size, server_url):
         """Print information for local IPSW + IPS files"""
         if RICH_AVAILABLE:
             table = Table(title="📁 Local Files Information", box=box.ROUNDED)
@@ -96,11 +129,13 @@ class IPSWCLIFormatter:
             table.add_column("Status", style="white")
             table.add_row("IPSW", ipsw_filename, f"{ipsw_size:,} bytes", "✅ Ready")
             table.add_row("IPS", ips_filename, f"{ips_size:,} bytes", "✅ Ready")
+            table.add_row("Server", server_url, "-", "🌐 Connected")
             self.console.print(table)
         else:
             self._print_fallback_info("Local Files Information", [
                 ("IPSW File", f"{ipsw_filename} ({ipsw_size:,} bytes)"),
                 ("IPS File", f"{ips_filename} ({ips_size:,} bytes)"),
+                ("Server", server_url),
                 ("Status", "✅ Both files ready for processing")
             ])
     
@@ -135,6 +170,16 @@ class IPSWCLIFormatter:
                 print(f"{Fore.RED}{Style.BRIGHT}❌ Error: {message}{Style.RESET_ALL}")
             else:
                 print(f"❌ Error: {message}")
+    
+    def print_warning(self, message):
+        """Print warning message"""
+        if RICH_AVAILABLE:
+            self.console.print(f"⚠️  {message}", style="bold yellow")
+        else:
+            if COLORAMA_AVAILABLE:
+                print(f"{Fore.YELLOW}{Style.BRIGHT}⚠️  {message}{Style.RESET_ALL}")
+            else:
+                print(f"⚠️  {message}")
     
     def print_device_info(self, file_info):
         """Print device and crash information"""
@@ -179,49 +224,6 @@ class IPSWCLIFormatter:
             info_items.append(("File Type", file_type))
             
             self._print_fallback_info("Device & Crash Information", info_items)
-    
-    def print_symbolication_stats(self, symbolicated_output):
-        """Print symbolication statistics"""
-        if not symbolicated_output:
-            return
-            
-        lines = symbolicated_output.split('\n')
-        symbol_lines = len([l for l in lines if '+' in l and '<unknown>' not in l])
-        unknown_lines = len([l for l in lines if '<unknown>' in l])
-        total_addresses = len([l for l in lines if '+' in l])
-        kernel_addresses = symbolicated_output.count('0xfffffff')
-        
-        success_rate = (symbol_lines / total_addresses * 100) if total_addresses > 0 else 0
-        
-        if RICH_AVAILABLE:
-            table = Table(title="📊 Symbolication Statistics", box=box.ROUNDED)
-            table.add_column("Metric", style="bold cyan")
-            table.add_column("Count", style="white", justify="right")
-            table.add_column("Status", style="white")
-            
-            table.add_row("Symbols Found", str(symbol_lines), "✅")
-            table.add_row("Unknown Symbols", str(unknown_lines), "❓")
-            table.add_row("Kernel Addresses", str(kernel_addresses), "🔧")
-            
-            if success_rate >= 80:
-                status_text = "Excellent"
-            elif success_rate >= 50:
-                status_text = "Good"
-            else:
-                status_text = "Poor"
-            
-            table.add_row("Success Rate", f"{success_rate:.1f}%", status_text)
-            
-            self.console.print(table)
-        else:
-            status_text = "Excellent" if success_rate >= 80 else "Good" if success_rate >= 50 else "Poor"
-            
-            self._print_fallback_info("Symbolication Statistics", [
-                ("Symbols Found", str(symbol_lines)),
-                ("Unknown Symbols", str(unknown_lines)),
-                ("Kernel Addresses", str(kernel_addresses)),
-                ("Success Rate", f"{success_rate:.1f}% ({status_text})")
-            ])
     
     def print_symbolicated_output(self, output, show_full=False, max_lines=50):
         """Print symbolicated output with syntax highlighting"""
@@ -297,6 +299,47 @@ class IPSWCLIFormatter:
             if result.get('analysis_id'):
                 print(f"🆔 Analysis ID: {result['analysis_id']}")
 
+def detect_local_server():
+    """Detect if local server is running"""
+    try:
+        response = requests.get("http://localhost:8000/health", timeout=2)
+        return response.status_code == 200
+    except:
+        return False
+
+def check_docker_running():
+    """Check if Docker containers are running"""
+    try:
+        result = subprocess.run(['docker', 'ps', '--filter', 'name=ipsw', '--format', '{{.Names}}'], 
+                              capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            containers = result.stdout.strip().split('\n')
+            return len([c for c in containers if c.strip()]) >= 3  # At least 3 containers
+    except:
+        pass
+    return False
+
+def start_local_server(formatter):
+    """Attempt to start local server"""
+    if not check_docker_running():
+        formatter.print_warning("Local IPSW Symbol Server not detected")
+        formatter.print_warning("Attempting to start server...")
+        
+        try:
+            # Try to start with docker compose
+            result = subprocess.run(['docker', 'compose', 'up', '-d'], 
+                                  capture_output=True, text=True, timeout=60)
+            if result.returncode == 0:
+                formatter.print_success("Local server started successfully!")
+                # Wait a moment for services to be ready
+                time.sleep(5)
+                return True
+            else:
+                return False
+        except:
+            return False
+    return True
+
 def validate_file(filepath):
     """Validate file exists and is readable"""
     path = Path(filepath)
@@ -307,6 +350,19 @@ def validate_file(filepath):
     if not os.access(path, os.R_OK):
         return False, f"File not readable: {filepath}"
     return True, None
+
+def check_server_health(server_url):
+    """Check if server is healthy"""
+    try:
+        response = requests.get(f"{server_url}/health", timeout=5)
+        if response.status_code == 200:
+            return True, response.json()
+        else:
+            return False, f"Server returned status {response.status_code}"
+    except requests.exceptions.ConnectionError:
+        return False, f"Cannot connect to {server_url}"
+    except Exception as e:
+        return False, str(e)
 
 def send_symbolication_request(server_url, filepath, formatter):
     """Send symbolication request to server"""
@@ -323,7 +379,7 @@ def send_symbolication_request(server_url, filepath, formatter):
         file_size = path.stat().st_size
         
         # Show file info
-        formatter.print_file_info(path.name, file_size)
+        formatter.print_file_info(path.name, file_size, server_url)
         
         # Show progress
         if RICH_AVAILABLE:
@@ -349,7 +405,9 @@ def send_symbolication_request(server_url, filepath, formatter):
             
     except requests.exceptions.ConnectionError:
         formatter.print_error(f"Cannot connect to server: {server_url}")
-        formatter.print_error("Make sure the IPSW Symbol Server is running")
+        if "localhost" in server_url:
+            formatter.print_error("Make sure the IPSW Symbol Server is running")
+            formatter.print_error("Try: docker compose up -d")
         return None
     except requests.exceptions.Timeout:
         formatter.print_error("Request timeout - file processing took too long")
@@ -380,7 +438,7 @@ def send_local_ipsw_request(server_url, ipsw_filepath, ips_filepath, formatter):
         ips_size = ips_path.stat().st_size
         
         # Show file info
-        formatter.print_local_ipsw_info(ipsw_path.name, ipsw_size, ips_path.name, ips_size)
+        formatter.print_local_ipsw_info(ipsw_path.name, ipsw_size, ips_path.name, ips_size, server_url)
         
         # Determine which endpoint to use based on file size
         # Use streaming endpoint for files larger than 1GB
@@ -430,7 +488,8 @@ def send_local_ipsw_request(server_url, ipsw_filepath, ips_filepath, formatter):
             
     except requests.exceptions.ConnectionError:
         formatter.print_error(f"Cannot connect to server: {server_url}")
-        formatter.print_error("Make sure the IPSW Symbol Server is running")
+        if "localhost" in server_url:
+            formatter.print_error("Make sure the IPSW Symbol Server is running")
         return None
     except requests.exceptions.Timeout:
         timeout_message = "Request timeout - large file streaming took too long (can take 30-60 minutes for 10GB+ files)" if 'use_streaming' in locals() and use_streaming else "Request timeout - processing took too long (large IPSW files can take 10-20 minutes)"
@@ -442,30 +501,36 @@ def send_local_ipsw_request(server_url, ipsw_filepath, ips_filepath, formatter):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="IPSW Symbol Server CLI - Professional iOS Crash Symbolication",
+        description="IPSW Symbol Server CLI - Unified Local & Network Client",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic symbolication
+  # Basic symbolication (auto-detect local/remote)
   ipsw-cli crash.ips
   
-  # Local IPSW + IPS symbolication (no S3 needed)
+  # Local IPSW + IPS symbolication
   ipsw-cli --local-ipsw firmware.ipsw crash.ips
   
-  # Custom server
-  ipsw-cli --server http://my-server:8000 crash.ips
+  # Connect to remote server
+  ipsw-cli --server http://10.100.102.17:8000 crash.ips
+  
+  # Remote with local IPSW
+  ipsw-cli --server http://192.168.1.100:8000 --local-ipsw firmware.ipsw crash.ips
+  
+  # Check server status
+  ipsw-cli --check
+  ipsw-cli --server http://10.100.102.17:8000 --check
   
   # Show complete output
   ipsw-cli --full crash.ips
-  
-  # Save results
-  ipsw-cli --save results.json crash.ips
         """
     )
     
     parser.add_argument('file', nargs='?', help='IPS crash file to symbolicate')
-    parser.add_argument('--server', '-s', default='http://localhost:8000', 
-                       help='IPSW Symbol Server URL (default: http://localhost:8000)')
+    parser.add_argument('--server', '-s', 
+                       help='IPSW Symbol Server URL (auto-detects localhost if not specified)')
+    parser.add_argument('--local-ipsw', help='Use local IPSW file instead of S3')
+    parser.add_argument('--check', action='store_true', help='Check server status')
     parser.add_argument('--full', '-f', action='store_true', 
                        help='Show complete symbolicated output (not truncated)')
     parser.add_argument('--save', '-o', help='Save result to JSON file')
@@ -473,18 +538,78 @@ Examples:
                        help='Minimal output mode')
     parser.add_argument('--no-banner', action='store_true', 
                        help='Skip banner display')
-    
-    # New local IPSW option
-    parser.add_argument('--local-ipsw', help='Use local IPSW file instead of S3 (requires IPS file as second argument)')
+    parser.add_argument('--no-autostart', action='store_true',
+                       help='Do not attempt to start local server automatically')
     
     args = parser.parse_args()
     
-    # Initialize formatter
-    formatter = IPSWCLIFormatter()
+    # Determine server URL and mode
+    if args.server:
+        server_url = args.server.rstrip('/')
+        is_local_server = 'localhost' in server_url or '127.0.0.1' in server_url
+        mode = "local" if is_local_server else "network"
+    else:
+        # Auto-detect local server
+        if detect_local_server():
+            server_url = "http://localhost:8000"
+            is_local_server = True
+            mode = "local"
+        else:
+            # Try to start local server if not disabled
+            if not args.no_autostart:
+                formatter_temp = IPSWCLIFormatter("local")
+                if start_local_server(formatter_temp):
+                    if detect_local_server():
+                        server_url = "http://localhost:8000"
+                        is_local_server = True
+                        mode = "local"
+                    else:
+                        print("❌ Failed to start local server. Please specify --server URL for remote access.")
+                        sys.exit(1)
+                else:
+                    print("❌ Cannot start local server. Please specify --server URL for remote access.")
+                    sys.exit(1)
+            else:
+                print("❌ No server specified and auto-start disabled. Use --server URL")
+                sys.exit(1)
+    
+    # Initialize formatter with detected mode
+    formatter = IPSWCLIFormatter(mode)
     
     # Show banner unless disabled
     if not args.no_banner:
         formatter.print_banner()
+    
+    # Check server health
+    server_ok, server_info = check_server_health(server_url)
+    if not server_ok:
+        formatter.print_error(f"Server check failed: {server_info}")
+        sys.exit(1)
+    
+    if not args.quiet:
+        formatter.print_success(f"Connected to server: {server_url}")
+    
+    # Handle check-only mode
+    if args.check:
+        if RICH_AVAILABLE:
+            table = Table(title="🔍 Server Status", box=box.ROUNDED)
+            table.add_column("Property", style="bold cyan")
+            table.add_column("Value", style="white")
+            table.add_row("URL", server_url)
+            table.add_row("Mode", "Local Server" if is_local_server else "Remote Server")
+            table.add_row("Status", "✅ Online")
+            table.add_row("Response", server_info.get('status', 'Unknown'))
+            table.add_row("Timestamp", server_info.get('timestamp', 'Unknown'))
+            formatter.console.print(table)
+        else:
+            formatter._print_fallback_info("Server Status", [
+                ("URL", server_url),
+                ("Mode", "Local Server" if is_local_server else "Remote Server"),
+                ("Status", "✅ Online"),
+                ("Response", server_info.get('status', 'Unknown')),
+                ("Timestamp", server_info.get('timestamp', 'Unknown'))
+            ])
+        return
     
     # Handle local IPSW mode
     if args.local_ipsw:
@@ -499,7 +624,7 @@ Examples:
             sys.exit(1)
         
         # Send local IPSW request
-        result_data = send_local_ipsw_request(args.server, args.local_ipsw, args.file, formatter)
+        result_data = send_local_ipsw_request(server_url, args.local_ipsw, args.file, formatter)
         if not result_data:
             sys.exit(1)
         
@@ -513,7 +638,7 @@ Examples:
             sys.exit(1)
         
         # Send standard request
-        result_data = send_symbolication_request(args.server, args.file, formatter)
+        result_data = send_symbolication_request(server_url, args.file, formatter)
         if not result_data:
             sys.exit(1)
         
@@ -524,10 +649,6 @@ Examples:
         # Show device info
         if not args.quiet and result.get('file_info'):
             formatter.print_device_info(result['file_info'])
-        
-        # Show symbolication stats
-        if not args.quiet and result.get('symbolicated_output'):
-            formatter.print_symbolication_stats(result['symbolicated_output'])
         
         # Show symbolicated output
         if result.get('symbolicated_output'):
@@ -548,20 +669,6 @@ Examples:
         # Show summary
         if not args.quiet:
             formatter.print_summary(result, processing_time)
-        
-        # Show findings if any
-        if not args.quiet and result.get('findings'):
-            if RICH_AVAILABLE:
-                findings_text = "\n".join(result['findings'])
-                formatter.console.print(Panel(
-                    findings_text,
-                    title="🔍 Processing Details",
-                    border_style="blue"
-                ))
-            else:
-                print("\n🔍 Processing Details:")
-                for finding in result['findings']:
-                    print(f"  {finding}")
         
     else:
         # Show error

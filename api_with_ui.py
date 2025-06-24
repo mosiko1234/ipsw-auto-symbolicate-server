@@ -10,12 +10,15 @@ import uuid
 import time
 import logging
 import asyncio
+import tempfile
+import shutil
+import aiofiles
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple
 from datetime import datetime
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Form
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +42,7 @@ app = FastAPI(
     version="3.0.0"
 )
 
+# Increase file upload size limits
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -89,32 +93,23 @@ except Exception as e:
     logger.error(f"Failed to initialize Device Mapping Manager: {e}")
     device_mapper = None
 
-# Startup and shutdown handlers for file watcher
-@app.on_event("startup")
-async def startup_event():
-    """Start background services"""
-    if s3_manager:
-        # Check if file watcher is enabled
-        file_watcher_enabled = os.getenv("FILE_WATCHER_ENABLED", "true").lower() == "true"
-        
-        if file_watcher_enabled:
-            # Get configuration from environment
-            check_interval = int(os.getenv("S3_CHECK_INTERVAL", "300"))  # 5 minutes default
-            
-            # Start S3 file watcher for auto-detection
-            await start_file_watcher(
-                s3_manager=s3_manager,
-                symbol_server_url=SYMBOL_SERVER_URL
-            )
-            logger.info(f"S3 file watcher started (check interval: {check_interval}s)")
-        else:
-            logger.info("File watcher disabled by configuration")
+# Large file upload tracking
+upload_sessions = {}
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Stop background services"""
-    stop_file_watcher()
-    logger.info("S3 file watcher stopped")
+class UploadSession:
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.temp_file = None
+        self.total_size = 0
+        self.uploaded_size = 0
+        self.filename = None
+        self.started_at = datetime.now()
+        
+class LargeFileUploadResponse(BaseModel):
+    session_id: str
+    message: str
+    bytes_received: int
+    total_size: Optional[int] = None
 
 class SymbolicationResult(BaseModel):
     success: bool
@@ -136,6 +131,11 @@ class AutoScanResult(BaseModel):
     found_files: List[Dict] = []
     download_started: bool = False
     download_id: Optional[str] = None
+
+class LocalIPSWRequest(BaseModel):
+    device_model: str
+    ios_version: str
+    build_number: Optional[str] = None
 
 def allowed_file(filename: str) -> bool:
     if not filename or '.' not in filename:
@@ -713,6 +713,379 @@ async def api_status():
             "api_url": SYMBOL_SERVER_URL,
             "error": str(e)
         }
+
+@app.post("/local-ipsw-symbolicate", response_model=SymbolicationResult)
+async def local_ipsw_symbolicate(
+    ipsw_file: UploadFile = File(..., description="IPSW file"),
+    ips_file: UploadFile = File(..., description="IPS crash file")
+):
+    """
+    Upload IPSW file and symbolicate IPS file in one command
+    Perfect for developers who want to use local files without S3
+    """
+    analysis_id = str(uuid.uuid4())[:8]
+    findings = []
+    
+    try:
+        start_time = time.time()
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Starting local IPSW symbolication for {analysis_id}")
+        
+        # Validate files
+        if not ipsw_file.filename.lower().endswith('.ipsw'):
+            raise HTTPException(status_code=400, detail="First file must be an IPSW file")
+        
+        if not allowed_file(ips_file.filename):
+            raise HTTPException(status_code=400, detail="Second file must be a valid crash file")
+        
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Files validated: IPSW={ipsw_file.filename}, IPS={ips_file.filename}")
+        
+        # Read IPS file content
+        ips_content = await ips_file.read()
+        crash_content = ips_content.decode('utf-8', errors='ignore')
+        
+        # Parse IPS file to extract metadata
+        file_info = parse_ips_file(crash_content)
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] IPS file parsed: device='{file_info.get('device_model')}', version='{file_info.get('ios_version')}'")
+        
+        # Save IPSW file to downloads directory
+        ipsw_content = await ipsw_file.read()
+        ipsw_filename = ipsw_file.filename
+        ipsw_path = TEMP_DIR / ipsw_filename
+        
+        with open(ipsw_path, 'wb') as f:
+            f.write(ipsw_content)
+        
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] IPSW file saved to: {ipsw_path}")
+        
+        # Scan IPSW file to Symbol Server
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Scanning IPSW to Symbol Server...")
+        
+        async with httpx.AsyncClient(timeout=1800.0) as client:  # 30 minutes timeout for large IPSW files
+            scan_response = await client.post(
+                f"{SYMBOL_SERVER_URL}/v1/syms/scan",
+                json={
+                    "ipsw_path": str(ipsw_path),
+                    "extract_kernelcache": True
+                }
+            )
+            
+            if scan_response.status_code != 200:
+                scan_error = f"Failed to scan IPSW: HTTP {scan_response.status_code}"
+                try:
+                    error_data = scan_response.json()
+                    scan_error += f" - {error_data.get('detail', 'Unknown error')}"
+                except:
+                    pass
+                findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {scan_error}")
+                return SymbolicationResult(
+                    success=False,
+                    message=scan_error,
+                    analysis_id=analysis_id,
+                    file_info=file_info,
+                    total_time=time.time() - start_time,
+                    findings=findings
+                )
+            
+            scan_result = scan_response.json()
+            symbols_count = scan_result.get('symbols_count', 0)
+            findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] IPSW scanned successfully: {symbols_count} symbols extracted")
+        
+        # Now symbolicate the crash file
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Starting symbolication...")
+        
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            symbolicate_response = await client.post(
+                f"{SYMBOL_SERVER_URL}/v1/symbolicate",
+                json={
+                    "crash_content": crash_content,
+                    "device_model": file_info.get('device_model', 'unknown'),
+                    "ios_version": file_info.get('ios_version', 'unknown'),
+                    "build_number": file_info.get('build_version')
+                }
+            )
+            
+            if symbolicate_response.status_code == 200:
+                symbolicate_result = symbolicate_response.json()
+                if symbolicate_result.get('success', False):
+                    symbolicated_output = symbolicate_result.get('symbolicated_crash', crash_content)
+                    
+                    # Enhanced success message
+                    message = f"Local IPSW symbolication completed successfully"
+                    if file_info.get('process_name'):
+                        message += f" (Process: {file_info['process_name']})"
+                    if file_info.get('device_model'):
+                        message += f" on {file_info['device_model']}"
+                    if file_info.get('ios_version'):
+                        message += f" iOS {file_info['ios_version']}"
+                    message += f" - {symbols_count} symbols available"
+                    
+                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Symbolication completed successfully")
+                    
+                    # Clean up IPSW file
+                    try:
+                        ipsw_path.unlink()
+                        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Temporary IPSW file cleaned up")
+                    except:
+                        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Warning: Could not clean up temporary IPSW file")
+                    
+                    return SymbolicationResult(
+                        success=True,
+                        message=message,
+                        symbolicated_output=symbolicated_output,
+                        analysis_id=analysis_id,
+                        file_info=file_info,
+                        total_time=time.time() - start_time,
+                        findings=findings
+                    )
+                else:
+                    error_msg = symbolicate_result.get('message', 'Unknown error')
+                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Symbolication failed: {error_msg}")
+                    return SymbolicationResult(
+                        success=False,
+                        message=f"Symbolication failed: {error_msg}",
+                        analysis_id=analysis_id,
+                        file_info=file_info,
+                        total_time=time.time() - start_time,
+                        findings=findings
+                    )
+            else:
+                error_msg = f"Symbolication request failed: HTTP {symbolicate_response.status_code}"
+                try:
+                    error_data = symbolicate_response.json()
+                    error_msg += f" - {error_data.get('detail', 'Unknown error')}"
+                except:
+                    pass
+                findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {error_msg}")
+                return SymbolicationResult(
+                    success=False,
+                    message=error_msg,
+                    analysis_id=analysis_id,
+                    file_info=file_info,
+                    total_time=time.time() - start_time,
+                    findings=findings
+                )
+                
+    except Exception as e:
+        error_msg = f"Local IPSW symbolication error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Exception: {error_msg}")
+        return SymbolicationResult(
+            success=False,
+            message=error_msg,
+            analysis_id=analysis_id,
+            file_info=file_info if 'file_info' in locals() else {},
+            total_time=time.time() - start_time if 'start_time' in locals() else 0,
+            findings=findings
+        )
+
+# Large File Upload Endpoints for IPSW files
+@app.post("/local-ipsw-symbolicate-stream", response_model=SymbolicationResult)
+async def local_ipsw_symbolicate_stream(
+    ipsw_file: UploadFile = File(..., description="IPSW file"),
+    ips_file: UploadFile = File(..., description="IPS crash file")
+):
+    """
+    Stream-based upload for large IPSW files with IPS symbolication
+    Handles files up to 15GB efficiently using temporary files and streaming
+    """
+    analysis_id = str(uuid.uuid4())[:8]
+    findings = []
+    ipsw_temp_path = None
+    
+    try:
+        start_time = time.time()
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Starting streaming IPSW symbolication for {analysis_id}")
+        
+        # Validate files
+        if not ipsw_file.filename.lower().endswith('.ipsw'):
+            raise HTTPException(status_code=400, detail="First file must be an IPSW file")
+        
+        if not allowed_file(ips_file.filename):
+            raise HTTPException(status_code=400, detail="Second file must be a valid crash file")
+        
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Files validated: IPSW={ipsw_file.filename}, IPS={ips_file.filename}")
+        
+        # Read IPS file content (small file) 
+        ips_content = await ips_file.read()
+        crash_content = ips_content.decode('utf-8', errors='ignore')
+        
+        # Parse IPS file to extract metadata
+        file_info = parse_ips_file(crash_content)
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] IPS file parsed: device='{file_info.get('device_model')}', version='{file_info.get('ios_version')}'")
+        
+        # Create temporary file for IPSW with proper extension
+        ipsw_temp_fd, ipsw_temp_path = tempfile.mkstemp(suffix='.ipsw', dir=TEMP_DIR)
+        os.close(ipsw_temp_fd)  # Close the file descriptor, we'll use async file operations
+        
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Created temporary file: {ipsw_temp_path}")
+        
+        # Stream IPSW file to temporary location using aiofiles for better performance
+        chunk_size = 1024 * 1024 * 8  # 8MB chunks for large files
+        bytes_written = 0
+        
+        async with aiofiles.open(ipsw_temp_path, 'wb') as temp_file:
+            while True:
+                chunk = await ipsw_file.read(chunk_size)
+                if not chunk:
+                    break
+                await temp_file.write(chunk) 
+                bytes_written += len(chunk)
+                
+                # Log progress for very large files
+                if bytes_written % (100 * 1024 * 1024) == 0:  # Every 100MB
+                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Streamed {bytes_written // (1024*1024):,} MB...")
+        
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] IPSW file streamed successfully: {bytes_written:,} bytes")
+        
+        # Scan IPSW file to Symbol Server
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Scanning IPSW to Symbol Server...")
+        
+        async with httpx.AsyncClient(timeout=1800.0) as client:  # 30 minutes timeout
+            scan_response = await client.post(
+                f"{SYMBOL_SERVER_URL}/v1/syms/scan",
+                json={
+                    "ipsw_path": str(ipsw_temp_path),
+                    "extract_kernelcache": True
+                }
+            )
+            
+            if scan_response.status_code != 200:
+                scan_error = f"Failed to scan IPSW: HTTP {scan_response.status_code}"
+                try:
+                    error_data = scan_response.json()
+                    scan_error += f" - {error_data.get('detail', 'Unknown error')}"
+                except:
+                    pass
+                findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {scan_error}")
+                return SymbolicationResult(
+                    success=False,
+                    message=scan_error,
+                    analysis_id=analysis_id,
+                    file_info=file_info,
+                    total_time=time.time() - start_time,
+                    findings=findings
+                )
+            
+            scan_result = scan_response.json()
+            symbols_count = scan_result.get('symbols_count', 0)
+            findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] IPSW scanned successfully: {symbols_count} symbols extracted")
+        
+        # Now symbolicate the crash file
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Starting symbolication...")
+        
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            symbolicate_response = await client.post(
+                f"{SYMBOL_SERVER_URL}/v1/symbolicate",
+                json={
+                    "crash_content": crash_content,
+                    "device_model": file_info.get('device_model', 'unknown'),
+                    "ios_version": file_info.get('ios_version', 'unknown'),
+                    "build_number": file_info.get('build_version')
+                }
+            )
+            
+            if symbolicate_response.status_code == 200:
+                symbolicate_result = symbolicate_response.json()
+                if symbolicate_result.get('success', False):
+                    symbolicated_output = symbolicate_result.get('symbolicated_crash', crash_content)
+                    
+                    # Enhanced success message
+                    message = f"Streaming IPSW symbolication completed successfully"
+                    if file_info.get('process_name'):
+                        message += f" (Process: {file_info['process_name']})"
+                    if file_info.get('device_model'):
+                        message += f" on {file_info['device_model']}"
+                    if file_info.get('ios_version'):
+                        message += f" iOS {file_info['ios_version']}"
+                    message += f" - {symbols_count} symbols available"
+                    
+                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Symbolication completed successfully")
+                    
+                    return SymbolicationResult(
+                        success=True,
+                        message=message,
+                        symbolicated_output=symbolicated_output,
+                        analysis_id=analysis_id,
+                        file_info=file_info,
+                        total_time=time.time() - start_time,
+                        findings=findings
+                    )
+                else:
+                    error_msg = symbolicate_result.get('message', 'Unknown error')
+                    findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Symbolication failed: {error_msg}")
+                    return SymbolicationResult(
+                        success=False,
+                        message=f"Symbolication failed: {error_msg}",
+                        analysis_id=analysis_id,
+                        file_info=file_info,
+                        total_time=time.time() - start_time,
+                        findings=findings
+                    )
+            else:
+                error_msg = f"Symbolication request failed: HTTP {symbolicate_response.status_code}"
+                try:
+                    error_data = symbolicate_response.json()
+                    error_msg += f" - {error_data.get('detail', 'Unknown error')}"
+                except:
+                    pass
+                findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {error_msg}")
+                return SymbolicationResult(
+                    success=False,
+                    message=error_msg,
+                    analysis_id=analysis_id,
+                    file_info=file_info,
+                    total_time=time.time() - start_time,
+                    findings=findings
+                )
+                
+    except Exception as e:
+        error_msg = f"Streaming IPSW symbolication error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Exception: {error_msg}")
+        return SymbolicationResult(
+            success=False,
+            message=error_msg,
+            analysis_id=analysis_id,
+            file_info=file_info if 'file_info' in locals() else {},
+            total_time=time.time() - start_time if 'start_time' in locals() else 0,
+            findings=findings
+        )
+    
+    finally:
+        # Clean up temporary IPSW file
+        if ipsw_temp_path and Path(ipsw_temp_path).exists():
+            try:
+                Path(ipsw_temp_path).unlink()
+                findings.append(f"[{datetime.now().strftime('%H:%M:%S')}] Temporary IPSW file cleaned up")
+            except Exception as cleanup_error:
+                logger.warning(f"Could not clean up temporary IPSW file: {cleanup_error}")
+
+# Startup and shutdown handlers for file watcher
+@app.on_event("startup")
+async def startup_event():
+    """Start background services"""
+    if s3_manager:
+        # Check if file watcher is enabled
+        file_watcher_enabled = os.getenv("FILE_WATCHER_ENABLED", "true").lower() == "true"
+        
+        if file_watcher_enabled:
+            # Get configuration from environment
+            check_interval = int(os.getenv("S3_CHECK_INTERVAL", "300"))  # 5 minutes default
+            
+            # Start S3 file watcher for auto-detection
+            await start_file_watcher(
+                s3_manager=s3_manager,
+                symbol_server_url=SYMBOL_SERVER_URL
+            )
+            logger.info(f"S3 file watcher started (check interval: {check_interval}s)")
+        else:
+            logger.info("File watcher disabled by configuration")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop background services"""
+    stop_file_watcher()
+    logger.info("S3 file watcher stopped")
 
 if __name__ == "__main__":
     import uvicorn

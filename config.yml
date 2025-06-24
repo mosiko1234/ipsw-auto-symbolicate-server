@@ -1,0 +1,20 @@
+# IPSW CLI Configuration for Symbol Server Project
+# מתחבר למערכת symbols המקומית
+
+database:
+  driver: postgres
+  name: symbols
+  host: localhost
+  port: 5432
+  user: symboluser
+  password: symbolpass
+
+daemon:
+  sigs-dir: ./signatures/kernel
+
+symbolicate:
+  color: true
+  demangle: true
+  
+logging:
+  level: info 
