@@ -1,0 +1,25 @@
+🎉 v3.1.0 DATABASE SYMBOLICATION SUCCESS!
+
+Using 17,976 symbols from database
+Device: iPhone17,3, iOS: 18.5
+Method: Fast database lookup
+
+{"bug_type":"288","timestamp":"2025-06-16 13:47:42.00 +0300","os_version":"iPhone OS 18.5 (22F76)","roots_installed":0,"incident_id":"B03BC030-1F90-41FF-A899-E89D6461D3F1"}
+{
+  "build" : "iPhone OS 18.5 (22F76)",
+  "product" : "iPhone15,2",
+  "kernel" : "Darwin Kernel Version 24.5.0: Tue Apr 22 20:38:51 PDT 2025; root:xnu-11417.122.4~1\/RELEASE_ARM64_T8120",
+  "tuning" : {
+
+  },
+  "incident" : "B03BC030-1F90-41FF-A899-E89D6461D3F1",
+  "crashReporterKey" : "eb69605398edbfbb99bbf88c91afff8dd5a2ad62",
+  "reason" : "stackshot via sysdiagnose",
+  "frontmostPids" : [
+    34
+  ],
+  "exception" : "0xbaaaaaad",
+  "codeSigningMonitor" : 2,
+  "roots_installed" : 0,
+  "bug_type" : "288",
+  "memoryStatus" : {"compressorSize":73513,"compressions":27601088,"decompressions":18896615,"busyBufferCount":0,"memoryPressureDetails":{"pagesWanted":0,"pagesReclaimed":0},"pageSize":16384,"memoryPressure":false,"memoryPages":{"active":102260,"throttled":0,"fileBacked":113441,"wired":69588,"purgeable":2307,"inac...

@@ -1,0 +1,348 @@
+#!/usr/bin/env python3
+"""
+💎 IPSW Symbol Server v3.1.0 - Professional Developer CLI
+All-in-one tool for iOS crash symbolication and IPSW management
+"""
+
+import argparse
+import requests
+import json
+import sys
+import os
+import shutil
+from pathlib import Path
+from datetime import datetime
+import time
+
+# Colors for beautiful output
+class Colors:
+    RED = '\033[0;31m'
+    GREEN = '\033[0;32m'
+    YELLOW = '\033[1;33m'
+    BLUE = '\033[0;34m'
+    PURPLE = '\033[0;35m'
+    CYAN = '\033[0;36m'
+    WHITE = '\033[1;37m'
+    GRAY = '\033[0;37m'
+    NC = '\033[0m'
+    BOLD = '\033[1m'
+
+# Unicode symbols
+ROCKET = '🚀'
+CHECK = '✅'
+CROSS = '❌'
+WARNING = '⚠️'
+INFO = 'ℹ️'
+GEAR = '⚙️'
+CHART = '📊'
+FILE = '📁'
+PHONE = '📱'
+LIGHTNING = '⚡'
+DATABASE = '🗄️'
+MAGNIFYING = '🔍'
+SPARKLE = '✨'
+PACKAGE = '📦'
+DIAMOND = '💎'
+
+class IPSWDevCLI:
+    """Professional IPSW Developer CLI Tool v3.1.0"""
+    
+    def __init__(self, server_url="http://localhost:8082"):
+        self.server_url = server_url
+        self.version = "3.1.0"
+        
+    def print_banner(self):
+        """Print beautiful CLI banner"""
+        print(f"{Colors.BOLD}{Colors.BLUE}")
+        print("╔═══════════════════════════════════════════════════════════════╗")
+        print(f"║               {ROCKET} IPSW Symbol Server v{self.version}                ║")
+        print("║             Professional Developer CLI Tool                   ║")
+        print("║            Database-First Symbolication Technology           ║")
+        print("╚═══════════════════════════════════════════════════════════════╝")
+        print(f"{Colors.NC}")
+    
+    def log_info(self, message):
+        print(f"{Colors.BLUE}{INFO} {message}{Colors.NC}")
+    
+    def log_success(self, message):
+        print(f"{Colors.GREEN}{CHECK} {message}{Colors.NC}")
+    
+    def log_warning(self, message):
+        print(f"{Colors.YELLOW}{WARNING} {message}{Colors.NC}")
+    
+    def log_error(self, message):
+        print(f"{Colors.RED}{CROSS} {message}{Colors.NC}")
+    
+    def log_progress(self, message):
+        print(f"{Colors.PURPLE}{GEAR} {message}{Colors.NC}")
+    
+    def check_server_health(self):
+        """Check server health and return status"""
+        try:
+            self.log_progress("Connecting to IPSW Symbol Server v3.1.0...")
+            response = requests.get(f"{self.server_url}/health", timeout=5)
+            return response.json() if response.status_code == 200 else None
+        except:
+            return None
+    
+    def symbolicate_file(self, file_path, output_path=None):
+        """Symbolicate crash file using v3.1.0 enhanced API"""
+        if not os.path.exists(file_path):
+            self.log_error(f"File not found: {file_path}")
+            return False
+        
+        # Auto-generate output path if not provided
+        if not output_path:
+            base_name = Path(file_path).stem
+            output_path = f"{base_name}_symbolicated.txt"
+        
+        self.log_progress(f"Symbolicating: {Path(file_path).name}")
+        
+        try:
+            with open(file_path, 'rb') as f:
+                files = {'crashlog': f}
+                response = requests.post(
+                    f"{self.server_url}/v1/symbolicate",
+                    files=files,
+                    timeout=300
+                )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('symbolicated', False):
+                    # Save symbolicated output
+                    with open(output_path, 'w') as f:
+                        f.write(f"# {ROCKET} IPSW Symbol Server v{self.version} - Symbolication Result\n")
+                        f.write(f"# Generated: {datetime.now()}\n")
+                        f.write(f"# Method: {result.get('method', 'unknown')}\n")
+                        f.write(f"# Input: {Path(file_path).name}\n")
+                        f.write("# " + "="*60 + "\n\n")
+                        f.write(result.get('output', ''))
+                    
+                    # Show success info
+                    self.log_success("Symbolication successful!")
+                    
+                    # Display method info
+                    method = result.get('method', 'unknown')
+                    if method == 'database_symbols':
+                        self.log_success(f"Method: Ultra-fast database lookup {LIGHTNING}")
+                        print(f"{Colors.BLUE}{DATABASE} Symbols used: {result.get('symbols_used', 0):,}{Colors.NC}")
+                    else:
+                        self.log_warning(f"Method: {method}")
+                    
+                    print(f"{Colors.BLUE}{FILE} Output saved: {output_path}{Colors.NC}")
+                    return True
+                else:
+                    self.log_error(f"Symbolication failed: {result.get('error', 'unknown')}")
+                    return False
+            else:
+                self.log_error(f"Server error: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            self.log_error(f"Error: {str(e)}")
+            return False
+    
+    def add_ipsw(self, ipsw_path, extract_symbols=True):
+        """Add IPSW file with optional symbol extraction"""
+        if not os.path.exists(ipsw_path):
+            self.log_error(f"IPSW file not found: {ipsw_path}")
+            return False
+        
+        # Get file info
+        file_size = os.path.getsize(ipsw_path)
+        filename = os.path.basename(ipsw_path)
+        
+        self.log_progress(f"Adding IPSW: {filename}")
+        print(f"{Colors.BLUE}{CHART} Size: {file_size:,} bytes (~{file_size // (1024**3)} GB){Colors.NC}")
+        
+        # Copy file to ipsw_files directory
+        ipsw_dir = Path("./ipsw_files")
+        ipsw_dir.mkdir(exist_ok=True)
+        
+        try:
+            dest_path = ipsw_dir / filename
+            shutil.copy2(ipsw_path, dest_path)
+            self.log_success(f"File copied to: {dest_path}")
+            
+            # Wait for server detection
+            self.log_progress("Waiting for server detection...")
+            time.sleep(3)
+            
+            # Verify detection
+            response = requests.get(f"{self.server_url}/v1/ipsw/list")
+            if response.status_code == 200:
+                ipsw_list = response.json()
+                detected = any(ipsw['filename'] == filename for ipsw in ipsw_list.get('ipsw_files', []))
+                
+                if detected:
+                    self.log_success("IPSW detected by server")
+                    
+                    # Show device info
+                    for ipsw in ipsw_list.get('ipsw_files', []):
+                        if ipsw['filename'] == filename:
+                            print(f"{Colors.CYAN}{PHONE} Device Information:{Colors.NC}")
+                            print(f"  Device: {ipsw.get('device_model', 'unknown')}")
+                            print(f"  iOS Version: {ipsw.get('os_version', 'unknown')}")
+                            print(f"  Build ID: {ipsw.get('build_id', 'unknown')}")
+                            break
+                else:
+                    self.log_error("IPSW not detected by server")
+                    return False
+            
+            # Scan with optional symbol extraction
+            scan_data = {
+                "path": f"/app/ipsw_files/{filename}",
+                "extract_symbols": extract_symbols
+            }
+            
+            self.log_progress(f"Scanning IPSW (Symbol extraction: {'ON' if extract_symbols else 'OFF'})")
+            
+            response = requests.post(
+                f"{self.server_url}/v1/syms/scan",
+                json=scan_data,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                self.log_success("Scan completed")
+                
+                # Monitor extraction if enabled
+                if extract_symbols and result.get('scan_id'):
+                    self.monitor_extraction(result['scan_id'])
+                
+                return True
+            else:
+                self.log_error(f"Scan failed: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            self.log_error(f"Error: {e}")
+            return False
+    
+    def monitor_extraction(self, scan_id):
+        """Monitor symbol extraction progress"""
+        self.log_progress(f"Monitoring symbol extraction (Scan ID: {scan_id})")
+        
+        for i in range(30):
+            try:
+                response = requests.get(f"{self.server_url}/v1/syms/scans")
+                if response.status_code == 200:
+                    scans = response.json().get('scans', [])
+                    scan = next((s for s in scans if s.get('id') == scan_id), None)
+                    
+                    if scan and scan.get('status') == 'completed':
+                        self.log_success("Symbol extraction completed!")
+                        return True
+                    elif scan and scan.get('status') == 'failed':
+                        self.log_error("Symbol extraction failed")
+                        return False
+                
+                print(f"\r{Colors.PURPLE}{GEAR} Extracting symbols... ({i+1}/30){Colors.NC}", end='', flush=True)
+                time.sleep(5)
+                
+            except Exception as e:
+                self.log_error(f"Error monitoring: {e}")
+                return False
+        
+        print()
+        self.log_warning("Extraction monitoring timeout")
+        return False
+    
+    def show_status(self):
+        """Show comprehensive system status"""
+        health = self.check_server_health()
+        
+        if not health:
+            self.log_error("Server not available")
+            print(f"{Colors.YELLOW}{INFO} Start with: docker-compose up -d{Colors.NC}")
+            return
+        
+        print(f"{Colors.CYAN}{MAGNIFYING} System Status:{Colors.NC}")
+        print(f"  Server: {Colors.GREEN}{CHECK} Online{Colors.NC} (v{health.get('version', 'unknown')})")
+        print(f"  Database: {Colors.GREEN}{CHECK} Connected{Colors.NC} ({health.get('symbols_in_database', 0):,} symbols)")
+        
+        # Get additional stats
+        try:
+            # IPSW list
+            response = requests.get(f"{self.server_url}/v1/ipsw/list")
+            if response.status_code == 200:
+                ipsw_data = response.json()
+                ipsw_files = ipsw_data.get('ipsw_files', [])
+                
+                if ipsw_files:
+                    print(f"{Colors.CYAN}{PHONE} Available IPSW Files:{Colors.NC}")
+                    for ipsw in ipsw_files[:5]:
+                        print(f"  {ipsw.get('device_model', 'unknown')} iOS {ipsw.get('os_version', 'unknown')}")
+                    if len(ipsw_files) > 5:
+                        print(f"  ... and {len(ipsw_files) - 5} more")
+                else:
+                    print(f"{Colors.GRAY}No IPSW files available{Colors.NC}")
+            
+            # Symbol statistics
+            response = requests.get(f"{self.server_url}/v1/syms/stats")
+            if response.status_code == 200:
+                stats = response.json()
+                
+                print(f"{Colors.CYAN}{CHART} Symbol Database Statistics:{Colors.NC}")
+                print(f"  Total Symbols: {stats.get('total_symbols', 0):,}")
+                print(f"  Scanned IPSWs: {stats.get('scanned_ipsws', 0)}")
+                print(f"  Extraction Rate: {stats.get('extraction_rate', '0%')}")
+                    
+        except Exception as e:
+            self.log_error(f"Error getting additional stats: {e}")
+
+def main():
+    """Main CLI entry point"""
+    parser = argparse.ArgumentParser(
+        description=f"{ROCKET} IPSW Symbol Server v3.1.0 - Professional Developer CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  ipsw-dev-cli status                           # Show system status
+  ipsw-dev-cli symbolicate crash.ips           # Symbolicate crash file
+  ipsw-dev-cli add-ipsw file.ipsw              # Add IPSW with symbol extraction
+  ipsw-dev-cli add-ipsw file.ipsw --no-extract # Add IPSW without extraction
+        """
+    )
+    
+    parser.add_argument('--server', default='http://localhost:8082',
+                       help='Server URL (default: http://localhost:8082)')
+    
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+    
+    # Status command
+    status_parser = subparsers.add_parser('status', help='Show system status')
+    
+    # Symbolicate command
+    sym_parser = subparsers.add_parser('symbolicate', help='Symbolicate crash file')
+    sym_parser.add_argument('file', help='Crash file to symbolicate')
+    sym_parser.add_argument('-o', '--output', help='Output file path')
+    
+    # Add IPSW command
+    add_parser = subparsers.add_parser('add-ipsw', help='Add IPSW file')
+    add_parser.add_argument('file', help='IPSW file to add')
+    add_parser.add_argument('--no-extract', action='store_true',
+                           help='Skip symbol extraction')
+    
+    args = parser.parse_args()
+    
+    if not args.command:
+        parser.print_help()
+        return
+    
+    cli = IPSWDevCLI(args.server)
+    cli.print_banner()
+    
+    if args.command == 'status':
+        cli.show_status()
+    elif args.command == 'symbolicate':
+        success = cli.symbolicate_file(args.file, args.output)
+        sys.exit(0 if success else 1)
+    elif args.command == 'add-ipsw':
+        success = cli.add_ipsw(args.file, not args.no_extract)
+        sys.exit(0 if success else 1)
+
+if __name__ == '__main__':
+    main()

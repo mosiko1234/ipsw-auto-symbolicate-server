@@ -1,0 +1,26 @@
+🎉 v3.1.0 DATABASE SYMBOLICATION SUCCESS!
+
+Using 17,976 symbols from database
+Device: iPhone17,3, iOS: 18.5
+Method: Fast database lookup
+
+{"bug_type":"288","timestamp":"2025-06-12 08:04:25.00 +0300","os_version":"iPhone OS 18.5 (22F76)","roots_installed":0,"incident_id":"A9A64939-BA36-45FF-8F04-4CA35FF15651"}
+{
+  "build" : "iPhone OS 18.5 (22F76)",
+  "product" : "iPhone17,3",
+  "kernel" : "Darwin Kernel Version 24.5.0: Tue Apr 22 20:38:09 PDT 2025; root:xnu-11417.122.4~1\/RELEASE_ARM64_T8140",
+  "tuning" : {
+
+  },
+  "incident" : "A9A64939-BA36-45FF-8F04-4CA35FF15651",
+  "crashReporterKey" : "a05d96e0f6b67ccf46690d33470d3d3c94d71df4",
+  "reason" : "XPC message timeout in -[AVAudioSessionRemoteXPCClient setProperties:values:MXProperties:batchStrategy:genericMXPipe:reply:], probably deadlocked. Writing a stackshot and terminating.",
+  "frontmostPids" : [
+    34
+  ],
+  "exception" : "0xbe18d1ee",
+  "codeSigningMonitor" : 2,
+  "roots_installed" : 0,
+  "bug_type" : "288",
+  "pid" : 107,
+  "memoryStatus" : {"compressorSize":31961,"compressions":491809,"decompressions":293159,"busyBufferCount":0,"memoryPressureDetails":{"pagesWa...
