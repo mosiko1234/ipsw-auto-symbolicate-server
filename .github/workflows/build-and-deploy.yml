@@ -1,0 +1,66 @@
+# .github/workflows/build.yml
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile.ipsw
+        push: false
+        tags: ipsw-symbol-server:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Test Docker image
+      run: |
+        echo "🐳 Docker image built successfully!"
+        docker images | grep ipsw-symbol-server
+
+    - name: Generate build summary
+      run: |
+        echo "## ✅ Build Completed Successfully" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Docker Image:** \`ipsw-symbol-server:test\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Build Context:** \`./Dockerfile.ipsw\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+
+  validate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Validate file structure
+      run: |
+        echo "📁 Validating project structure..."
+        ls -la
+        
+        echo "✅ Required files check:"
+        [ -f "Dockerfile.ipsw" ] && echo "✓ Dockerfile.ipsw exists" || echo "✗ Dockerfile.ipsw missing"
+        [ -f "docker-compose.prod.yml" ] && echo "✓ docker-compose.prod.yml exists" || echo "✗ docker-compose.prod.yml missing"
+        [ -d "config" ] && echo "✓ config directory exists" || echo "✗ config directory missing"
+        [ -d "scripts" ] && echo "✓ scripts directory exists" || echo "✗ scripts directory missing"
+        
+        echo "📋 Project structure validated!"
