@@ -1,0 +1,61 @@
+FROM ubuntu:22.04
+
+LABEL maintainer="your-email@example.com"
+LABEL description="IPSW Symbol Server with daemon"
+
+# Prevent interactive prompts during installation
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    ca-certificates \
+    jq \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app user
+RUN useradd -r -s /bin/false -m -d /app ipsw
+
+# Set working directory
+WORKDIR /app
+
+# Install ipsw from GitHub releases
+RUN ARCH=$(dpkg --print-architecture) && \
+    case "$ARCH" in \
+        amd64) ARCH="x86_64" ;; \
+        arm64) ARCH="arm64" ;; \
+        *) echo "Unsupported architecture: $ARCH" && exit 1 ;; \
+    esac && \
+    LATEST_VERSION=$(curl -s https://api.github.com/repos/blacktop/ipsw/releases/latest | jq -r '.tag_name' | sed 's/v//') && \
+    echo "Installing ipsw version: $LATEST_VERSION for architecture: $ARCH" && \
+    curl -L -o /tmp/ipsw.tar.gz \
+    "https://github.com/blacktop/ipsw/releases/latest/download/ipsw_${LATEST_VERSION}_linux_${ARCH}.tar.gz" && \
+    tar -xzf /tmp/ipsw.tar.gz -C /usr/local/bin/ && \
+    chmod +x /usr/local/bin/ipsw && \
+    rm /tmp/ipsw.tar.gz && \
+    /usr/local/bin/ipsw version
+
+# Clone symbolicator repository
+RUN git clone --depth 1 https://github.com/blacktop/symbolicator.git /app/symbolicator && \
+    chown -R ipsw:ipsw /app/symbolicator
+
+# Create necessary directories
+RUN mkdir -p /app/config /app/data /app/logs && \
+    chown -R ipsw:ipsw /app
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3993/health || exit 1
+
+# Switch to app user
+USER ipsw
+
+# Expose port
+EXPOSE 3993
+
+# Default command
+CMD ["ipswd", "start"]
