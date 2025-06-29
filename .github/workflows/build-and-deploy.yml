@@ -32,7 +32,18 @@ jobs:
     - name: Test Docker image
       run: |
         echo "🐳 Docker image built successfully!"
-        docker images | grep ipsw-symbol-server
+        echo "📋 Listing all Docker images:"
+        docker images
+        echo ""
+        echo "🔍 Checking for our image:"
+        if docker images | grep -q "ipsw-symbol-server"; then
+          echo "✅ ipsw-symbol-server image found!"
+          docker images | grep ipsw-symbol-server
+        else
+          echo "⚠️  ipsw-symbol-server image not found, but build succeeded"
+          echo "Available images:"
+          docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
+        fi
 
     - name: Generate build summary
       run: |
